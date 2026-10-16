@@ -794,6 +794,16 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp sort_issues_for_dispatch(issues) when is_list(issues) do
+    adapter = Tracker.adapter()
+
+    if function_exported?(adapter, :dispatch_order_key, 1) do
+      Enum.sort_by(issues, &adapter.dispatch_order_key/1)
+    else
+      default_sort_issues_for_dispatch(issues)
+    end
+  end
+
+  defp default_sort_issues_for_dispatch(issues) do
     Enum.sort_by(issues, fn
       %Issue{} = issue ->
         {priority_rank(issue.priority), issue_created_at_sort_key(issue), issue.identifier || issue.id || ""}

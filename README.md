@@ -39,3 +39,10 @@ help with the setup:
 ## License
 
 This project is licensed under the [Apache License 2.0](LICENSE).
+
+## GitHub Projects integration
+
+This fork includes a configurable GitHub Projects controller, durable work-cycle
+recovery, agent-owned Git/PR publication, named Codex permissions and an optional
+browser evidence harness. See [setup and worker configuration](integrations/github_projects/README.md).
+Application verification scenarios and fixtures are supplied externally.

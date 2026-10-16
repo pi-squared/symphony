@@ -157,8 +157,10 @@ defmodule SymphonyElixir.Workspace do
   end
 
   defp remove_local_workspace(workspace) do
-    maybe_run_before_remove_hook(workspace, nil)
-    File.rm_rf(workspace)
+    case maybe_run_before_remove_hook(workspace, nil) do
+      :ok -> File.rm_rf(workspace)
+      {:error, reason} -> {:error, reason, ""}
+    end
   end
 
   @spec remove_issue_workspaces(term()) :: :ok
@@ -345,7 +347,7 @@ defmodule SymphonyElixir.Workspace do
               "before_remove",
               nil
             )
-            |> ignore_hook_failure()
+            |> cleanup_hook_result()
         end
 
       false ->
@@ -389,6 +391,10 @@ defmodule SymphonyElixir.Workspace do
         end
         |> ignore_hook_failure()
     end
+  end
+
+  defp cleanup_hook_result(result) do
+    if Config.settings!().tracker.kind == "github_projects", do: result, else: ignore_hook_failure(result)
   end
 
   defp ignore_hook_failure(:ok), do: :ok

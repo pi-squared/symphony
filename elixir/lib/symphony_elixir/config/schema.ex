@@ -190,6 +190,7 @@ defmodule SymphonyElixir.Config.Schema do
         }
       )
 
+      field(:permissions, :string)
       field(:thread_sandbox, :string, default: "workspace-write")
       field(:turn_sandbox_policy, :map)
       field(:turn_timeout_ms, :integer, default: 3_600_000)
@@ -205,6 +206,7 @@ defmodule SymphonyElixir.Config.Schema do
         [
           :command,
           :approval_policy,
+          :permissions,
           :thread_sandbox,
           :turn_sandbox_policy,
           :turn_timeout_ms,
@@ -213,6 +215,18 @@ defmodule SymphonyElixir.Config.Schema do
         ],
         empty_values: []
       )
+      |> validate_change(:permissions, fn :permissions, profile ->
+        cond do
+          String.trim(profile) == "" ->
+            [permissions: "must name a permission profile"]
+
+          Map.has_key?(attrs, "thread_sandbox") or Map.has_key?(attrs, "turn_sandbox_policy") ->
+            [permissions: "cannot be combined with legacy sandbox overrides"]
+
+          true ->
+            []
+        end
+      end)
       |> validate_required([:command])
       |> validate_change(:command, fn :command, command ->
         if command != "" and String.trim(command) == "" do
