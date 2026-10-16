@@ -1,0 +1,17 @@
+{
+  "repository": "pi-squared/OpenContracts-Databricks",
+  "campaign_commit": "511c298b4a21ba6159329561fbf67a0ce0a94c0b",
+  "campaign_sha256": "4643ff1bde5fefd0964be973e70d13703c4d98ce8b034b51cdd02db75a95c0a7",
+  "adopted": [
+    "CURSOR",
+    "Campaign.caption",
+    "Campaign.click",
+    "native 1440x900 context/video lifecycle"
+  ],
+  "preflight_sources": {
+    "tests/ui/capture.py": "12a88463fd109e5cdcfc74327c6f64fa87cd65e63b97f9f3018760a3b2d9e8f4",
+    "tools/browser_preflight.py": "3e55c232fb4d1976491b74a1f7bbeb2f29dc2fac0c16daa5e1a283ff7214ad36",
+    "tools/browser_preflight.mjs": "08d762738705cf2f98315f3292aa520c6948432765765498d3d472ea61a04619"
+  },
+  "adaptation": "Reusable recording helpers; application startup and verification scenarios are supplied by external workers."
+}

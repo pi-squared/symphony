@@ -13,6 +13,7 @@ defmodule SymphonyElixir.Tracker do
   @adapters %{
     "asana" => SymphonyElixir.Asana.Adapter,
     "github" => SymphonyElixir.GitHub.Adapter,
+    "github_projects" => SymphonyElixir.GitHubProjects.Adapter,
     "gitlab" => SymphonyElixir.GitLab.Adapter,
     "jira" => SymphonyElixir.Jira.Adapter,
     "linear" => SymphonyElixir.Linear.Adapter,
@@ -24,10 +25,12 @@ defmodule SymphonyElixir.Tracker do
   @callback agent_tool_specs() :: [map()]
   @callback execute_agent_tool(String.t(), term(), keyword()) :: map()
   @callback secret_environment_names(map()) :: [String.t()]
+  @callback dispatch_order_key(Issue.t()) :: term()
   @callback validate_config(map()) :: :ok | {:error, term()}
 
   @optional_callbacks agent_tool_specs: 0,
                       execute_agent_tool: 3,
+                      dispatch_order_key: 1,
                       validate_config: 1
 
   @spec fetch_issues_by_states([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}

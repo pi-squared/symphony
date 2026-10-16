@@ -13,7 +13,7 @@ This directory contains the current Elixir/OTP implementation of Symphony, based
 
 ## How it works
 
-1. Polls the configured tracker for candidate work (included adapters: Linear, GitHub Issues, Jira
+1. Polls the configured tracker for candidate work (included adapters: Linear, GitHub Issues, GitHub Projects, Jira
    Cloud, Asana, and GitLab)
 2. Creates a workspace per issue
 3. Launches Codex in [App Server mode](https://developers.openai.com/codex/app-server/) inside the
@@ -261,6 +261,20 @@ codex:
   `body`; Symphony executes it host-side with the session-bound token, removes configured tracker
   credentials and provider authentication aliases from the Codex child, and leaves raw tool access
   limited by that token's GitHub permissions.
+
+### GitHub Projects adapter
+
+Use `tracker.kind: github_projects` with the configurable Python host controller.
+It adds Project-board admission and ordering, human-controlled rework/landing,
+durable work-cycle recovery, current-revision validation and optional evidence
+publication. See [installation and workflow setup](../integrations/github_projects/README.md).
+The supplied Linear workflow and existing tracker adapters remain available.
+
+Set `codex.permissions` to select a named Codex permission profile. Profile mode
+omits `sandbox` on `thread/start` and `sandboxPolicy` on `turn/start`; explicit
+legacy sandbox overrides cannot be combined with a profile. Project tools receive
+both the bound issue and workspace. Local Project cleanup preserves the checkout
+when its required `before_remove` hook fails.
 
 ### Jira Cloud adapter
 

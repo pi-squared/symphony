@@ -22,8 +22,9 @@ defmodule SymphonyElixir.Config do
 
   @type codex_runtime_settings :: %{
           approval_policy: String.t() | map(),
-          thread_sandbox: String.t(),
-          turn_sandbox_policy: map()
+          permissions: String.t() | nil,
+          thread_sandbox: String.t() | nil,
+          turn_sandbox_policy: map() | nil
         }
 
   @spec settings() :: {:ok, Schema.t()} | {:error, term()}
@@ -100,18 +101,20 @@ defmodule SymphonyElixir.Config do
   @spec codex_runtime_settings(Path.t() | nil, keyword()) ::
           {:ok, codex_runtime_settings()} | {:error, term()}
   def codex_runtime_settings(workspace \\ nil, opts \\ []) do
-    with {:ok, settings} <- settings() do
-      with {:ok, turn_sandbox_policy} <-
-             Schema.resolve_runtime_turn_sandbox_policy(settings, workspace, opts) do
-        {:ok,
-         %{
-           approval_policy: settings.codex.approval_policy,
-           thread_sandbox: settings.codex.thread_sandbox,
-           turn_sandbox_policy: turn_sandbox_policy
-         }}
-      end
+    with {:ok, settings} <- settings(),
+         {:ok, turn_sandbox_policy} <- runtime_turn_policy(settings, workspace, opts) do
+      {:ok,
+       %{
+         approval_policy: settings.codex.approval_policy,
+         permissions: settings.codex.permissions,
+         thread_sandbox: settings.codex.thread_sandbox,
+         turn_sandbox_policy: turn_sandbox_policy
+       }}
     end
   end
+
+  defp runtime_turn_policy(%{codex: %{permissions: profile}}, _workspace, _opts) when is_binary(profile), do: {:ok, nil}
+  defp runtime_turn_policy(settings, workspace, opts), do: Schema.resolve_runtime_turn_sandbox_policy(settings, workspace, opts)
 
   @doc false
   @spec validate_settings(Schema.t()) :: :ok | {:error, term()}

@@ -327,3 +327,10 @@ Use this exact structure for the persistent workpad comment and keep it updated 
 
 - <only include when something was confusing during execution>
 ````
+
+## GitHub Projects workflow alternative
+
+For Projects v2 boards, use the configurable workflow and worker skill templates
+from [the GitHub Projects integration](../integrations/github_projects/README.md).
+Its installer supplies repository, board roles and named Codex permissions.
+Browser scenarios and application fixtures are supplied by an external worker.

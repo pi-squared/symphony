@@ -478,6 +478,10 @@ fields locally if they want stricter startup checks.
   - The launched process MUST speak a compatible app-server protocol over stdio.
 - `approval_policy` (Codex `AskForApproval` value)
   - Default: implementation-defined.
+- `permissions` (optional named Codex permission profile)
+  - This fork passes the selected profile as `permissions` on `thread/start` and
+    omits legacy thread/turn sandbox fields. A nonempty profile name and explicit
+    `thread_sandbox` or `turn_sandbox_policy` overrides are mutually exclusive.
 - `thread_sandbox` (Codex `SandboxMode` value)
   - Default: implementation-defined.
 - `turn_sandbox_policy` (Codex `SandboxPolicy` value)
@@ -923,7 +927,9 @@ Failure semantics:
 - `after_create` failure or timeout is fatal to workspace creation.
 - `before_run` failure or timeout is fatal to the current run attempt.
 - `after_run` failure or timeout is logged and ignored.
-- `before_remove` failure or timeout is logged and ignored.
+- `before_remove` failure or timeout is logged and ignored by default. This fork's
+  local `github_projects` integration instead preserves the checkout and returns
+  the hook error, allowing required cleanup and recovery to finish before deletion.
 
 ### 9.5 Safety Invariants
 
@@ -2094,7 +2100,8 @@ Unless otherwise noted, Sections 17.1 through 17.7 are `Core Conformance`. Bulle
 - `after_create` hook runs only on new workspace creation
 - `before_run` hook runs before each attempt and failure/timeouts abort the current attempt
 - `after_run` hook runs after each attempt and failure/timeouts are logged and ignored
-- `before_remove` hook runs on cleanup and failures/timeouts are ignored
+- `before_remove` hook runs on cleanup; failures/timeouts are ignored except for
+  this fork's local `github_projects` integration, which preserves the checkout
 - Workspace path sanitization, stable original-identifier-hash collision resistance, and root
   containment invariants are enforced before agent launch
 - Identifiers unchanged by sanitization keep their deterministic workspace key; conformance tests

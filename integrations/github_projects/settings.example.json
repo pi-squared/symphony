@@ -1,0 +1,16 @@
+{
+  "repository": "owner/repository",
+  "project_owner": "owner",
+  "project_number": 1,
+  "base_branch": "main",
+  "required_checks": ["make-all", "github-projects"],
+  "checks": [["{python}", "-m", "unittest", "discover", "-s", "tests"]],
+  "fields": {"status": "Status", "priority": "Priority", "execution_order": "Execution order"},
+  "required_labels": ["ready-for-agent"],
+  "protected_paths": [],
+  "runtime_bin": [],
+  "runtime_roots": [],
+  "max_concurrent_agents": 1,
+  "model": "gpt-6.1-sol",
+  "reasoning": "medium"
+}
