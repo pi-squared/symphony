@@ -154,6 +154,27 @@ class ControllerTests(unittest.TestCase):
     def success(self):
         self.gh.check_rows = [{'name': name, 'state': 'success'} for name in self.controller.policy['validation']['required_checks']]
 
+    def test_host_git_remote_is_bound_and_checks_publication(self):
+        sha = self.checkout()
+        with patch.object(self.controller, 'validate') as validate, \
+             patch.object(self.gh, 'remote_head', return_value=sha), \
+             patch.object(c.support, 'run') as run:
+            result = self.controller.git_remote('item-3', self.path, 'push')
+            self.assertTrue(result['remote_verified'])
+            validate.assert_called_once_with('item-3', self.path)
+            run.assert_not_called()
+        self.git('remote', 'set-url', 'origin', 'https://github.com/other/project.git')
+        with self.assertRaises(c.Error):
+            self.controller.git_remote('item-3', self.path, 'fetch')
+
+    def test_host_git_remote_never_pushes_uncommitted_source(self):
+        self.checkout()
+        (self.path/'hello.py').write_text('uncommitted')
+        with patch.object(self.controller, 'validate'), patch.object(c.support, 'run') as run:
+            with self.assertRaises(c.Error):
+                self.controller.git_remote('item-3', self.path, 'push')
+            run.assert_not_called()
+
     def test_all_eligible_candidates_are_returned_for_native_concurrency(self):
         self.gh.items = [item(4), item(3), item(8)]
         self.gh.items[2]['fieldValues']['nodes'].append({'number': 1, 'field': {'name': 'Execution order'}})

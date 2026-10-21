@@ -229,7 +229,12 @@ def install_stopped(destination, settings):
         body += "\n\n## Embedded operating procedures\n\n"
         for source in sorted((HERE / "templates/skills").glob("*/SKILL.md")):
             body += "\n### " + source.parent.name + "\n" + source.read_text().split("---", 2)[-1]
-        body += "\nUse packaged OpenAI skills only. Keep additional skill catalogs uninstalled.\n"
+        body += ("\nUse packaged OpenAI skills only. Keep additional skill catalogs uninstalled.\n"
+                 "For authenticated Git remote I/O call project_git with action fetch before merging "
+                 "origin/BASE_BRANCH, and action push after committing and validating. These host-bound "
+                 "operations replace shell git fetch/push in the embedded procedures. The host verifies "
+                 "the repository/branch and remote SHA; GitHub credentials remain outside this container. "
+                 "Use local Git for commits and merges, and github_api for draft PR creation.\n")
     workflow = "---\n" + json.dumps(policy, indent=2) + "\n---" + body
     (release / "WORKFLOW.md").write_text(workflow)
     ledger = Ledger(config["state_directory"])

@@ -734,6 +734,31 @@ class Controller:
                         validated_sha=browser.git(path, "rev-parse", "HEAD"), validation=report)
         return report
 
+    def git_remote(self, item_id, workspace, action):
+        _, item, task = self.find(item_id)
+        if not self.config["enabled"] or self.role(item) not in {"working", "merging"}:
+            raise Error("Git remote operations require an active working or Merging issue")
+        path = self.workspace(task, workspace)
+        if browser.git(path, "branch", "--show-current") != task.branch:
+            raise Error("Git remote operation must use the selected issue branch")
+        origin = browser.git(path, "remote", "get-url", "origin").removesuffix(".git")
+        if origin != "https://github.com/" + task.repository:
+            raise Error("The Git origin changed from the bound repository")
+        if action == "fetch":
+            support.run(["git", "fetch", "origin", self.base_branch], cwd=path, timeout=240)
+            return {"base_ref": self.base_ref, "sha": browser.git(path, "rev-parse", self.base_ref)}
+        if action != "push":
+            raise Error("Git remote action must be fetch or push")
+        self.validate(item_id, workspace)
+        sha = browser.git(path, "rev-parse", "HEAD")
+        if browser.git(path, "status", "--porcelain"):
+            raise Error("Commit scoped source changes before pushing")
+        if self.gh.remote_head(task.repository, task.branch) != sha:
+            support.run(["git", "push", "-u", "origin", task.branch], cwd=path, timeout=240)
+        if self.gh.remote_head(task.repository, task.branch) != sha:
+            raise Error("GitHub did not confirm the selected issue commit")
+        return {"branch": task.branch, "sha": sha, "remote_verified": True}
+
     def review(self, item_id, workspace, arguments):
         project, item, task = self.find(item_id)
         if not self.config["enabled"] or self.role(item) != "working":
@@ -880,6 +905,8 @@ class Controller:
                 return self.restart(task)
             if name == "project_validate":
                 return self.validate(item_id, workspace)
+            if name == "project_git":
+                return self.git_remote(item_id, workspace, args["action"])
             if name == "project_review":
                 return self.review(item_id, workspace, args)
             if name == "project_done":
