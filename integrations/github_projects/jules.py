@@ -301,10 +301,10 @@ class JulesWorker:
                 raise Error('Multiple PRs match the Jules cycle')
             if not prs:
                 report = json.loads((directory/'report.json').read_text())
-                body = (f"{MARKER}\n#### Context\n\nImplements {task.url}.\n\n#### TL;DR\n\n*Publish the independently validated Jules result for human review.*\n\n"
+                body = (f"#### Context\n\nImplements {task.url}.\n\n#### TL;DR\n\n*Publish the independently validated Jules result for human review.*\n\n"
                         "#### Summary\n\n- Jules supplied the retained patch; the host independently validated and published it.\n\n"
                         "#### Alternatives\n\n- Preserve one worker per issue and the existing human review gates.\n\n"
-                        "#### Test Plan\n\n" + '\n'.join(f"- {row['command']}: {row['result']}" for row in c.state.get(item_id)['validation']['checks']))
+                        "#### Test Plan\n\n" + '\n'.join(f"- [{'x' if row['result'] == 'passed' else ' '}] `{row['command']}`: {row['result']}" for row in c.state.get(item_id)['validation']['checks']))
                 # Intent precedes create. On ambiguous API response the next tick
                 # discovers an existing exact-branch PR before creating again.
                 c.gh.api(f'repos/{task.repository}/pulls', method='POST', payload={

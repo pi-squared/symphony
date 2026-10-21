@@ -10,6 +10,7 @@ import tempfile
 import re
 import io
 import tarfile
+import tomllib
 
 import sandbox
 
@@ -149,7 +150,21 @@ def auth_home(config, workspace):
         if path.name == 'skills':
             if path.is_symlink() or any(p.name != '.system' for p in path.iterdir()):
                 raise DockerError('Downloaded or installed worker skills require removal before restart')
-        elif path.name in {'config.toml', 'AGENTS.md'}:
+        elif path.name == 'config.toml':
+            # thread/start records project trust even when CLI overrides keep
+            # that project untrusted. Discard only this exact bookkeeping;
+            # arbitrary worker configuration must never survive a restart.
+            if path.is_symlink() or not path.is_file():
+                raise DockerError('Worker auth home contains custom configuration')
+            try:
+                saved = tomllib.loads(path.read_text())
+            except (OSError, ValueError):
+                raise DockerError('Worker auth home contains custom configuration') from None
+            expected = {'projects': {str(Path(workspace).resolve()): {'trust_level': 'trusted'}}}
+            if saved != expected:
+                raise DockerError('Worker auth home contains custom configuration')
+            path.unlink()
+        elif path.name == 'AGENTS.md':
             raise DockerError('Worker auth home contains custom configuration')
     return root
 

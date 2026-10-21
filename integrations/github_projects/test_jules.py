@@ -213,5 +213,7 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(self.git('status', '--porcelain'), '')
         self.assertEqual((self.path/'hello.py').read_text(), 'print("changed")\n')
         self.assertFalse((self.path/'.symphony-jules-report.json').exists())
+        self.assertNotIn('<!--', self.gh.pr['body'])
+        self.assertIn('- [x] ', self.gh.pr['body'])
         self.assertEqual(self.controller.state.get('item-3')['jules']['phase'], 'review')
         self.assertEqual(c.fields(self.gh.items[0])['Status'], 'In review')

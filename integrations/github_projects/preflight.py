@@ -111,6 +111,10 @@ def verify_profile(config_path, *, rework=False):
                 "approvalPolicy": workflow["codex"]["approval_policy"], **sandbox_params,
                 "dynamicTools": [{"name": "symphony_preflight", "description": "Protocol preflight only",
                                   "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}}]})
+            if config.get("docker"):
+                effective = request(51, "config/read", {"includeLayers": False})["config"]
+                if effective.get("developer_instructions") == "FORBIDDEN_PROJECT_SENTINEL":
+                    raise RuntimeError("Docker worker loaded project configuration after thread startup")
             if permissions:
                 probe = request(6, "command/exec", {"cwd": workspace,
                     "permissionProfile": permissions, "timeoutMs": 30000,

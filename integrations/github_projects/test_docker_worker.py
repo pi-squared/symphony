@@ -61,6 +61,26 @@ class DockerTests(unittest.TestCase):
                 d.stop(self.config, 'foreign', self.workspace)
             run.assert_not_called()
 
+    def test_restart_discards_only_automatic_bound_project_trust(self):
+        import json
+        home = d.auth_home(self.config, self.workspace)
+        config = home/'config.toml'
+        trust = '[projects.' + json.dumps(str(self.workspace)) + ']\ntrust_level="trusted"\n'
+        config.write_text(trust)
+        (home/'auth.json').write_text('refreshed')
+        self.assertEqual(d.auth_home(self.config, self.workspace), home)
+        self.assertFalse(config.exists())
+        self.assertEqual((home/'auth.json').read_text(), 'refreshed')
+        for custom in ('model="unexpected"\n' + trust, '[projects."/another"]\ntrust_level="trusted"\n'):
+            config.write_text(custom)
+            with self.assertRaises(d.DockerError):
+                d.auth_home(self.config, self.workspace)
+            self.assertTrue(config.exists())
+        config.unlink()
+        config.symlink_to(self.auth)
+        with self.assertRaises(d.DockerError):
+            d.auth_home(self.config, self.workspace)
+
     def test_unpinned_image_refused(self):
         self.config['docker']['image'] = 'latest'
         with self.assertRaises(d.DockerError):
