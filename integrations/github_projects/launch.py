@@ -35,13 +35,16 @@ def main():
     config = json.loads(args.config.read_text())
     if config["enabled"]:
         verify_preflight(args.config)
+    environment = worker_environment(config, args.config.parent)
+    if config.get("jules", {}).get("enabled"):
+        from jules import validate_runtime
+        validate_runtime(config, environment)
     lock = open(Path(config["state_directory"]) / "service.lock", "a")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         raise SystemExit("A Symphony instance already owns this installation") from None
     os.set_inheritable(lock.fileno(), True)
-    environment = worker_environment(config, args.config.parent)
     command = [config["symphony"], "--i-understand-that-this-will-be-running-without-the-usual-guardrails",
                "--logs-root", str(args.config.parent / "logs"), config["workflow"]]
     os.chdir(args.config.parent)

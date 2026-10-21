@@ -226,6 +226,10 @@ assignee filtering and the configured repository/board still apply. The local
 supervisor runs one Jules companion alongside Symphony's configured Codex pool.
 Only different issues run concurrently; claim locks and persisted backend choices
 prevent duplicate ownership. Label edits affect future claims, not active cycles.
+Include the CLI's supported Node runtime directory in `runtime_bin`; a login
+shell's Node version is not inherited by the supervisor. Preflight and startup
+load the CLI under that exact environment before either worker starts, retaining
+diagnostics privately if the CLI or its runtime cannot load.
 
 The CLI's lack of idempotent submission requires a write-ahead `submitting`
 record. A lost or malformed response becomes `submission_unknown` and reserves

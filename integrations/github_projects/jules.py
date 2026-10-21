@@ -20,6 +20,22 @@ REMOTE_ACTIVE = {'submitting', 'submission_unknown', 'remote'}
 TERMINAL = {'review', 'superseded', 'failed'}
 
 
+def validate_runtime(config, environment):
+    """Load the CLI under the exact supervisor environment before admission."""
+    directory = Path(config['state_directory']) / 'jules/runtime'
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        result = subprocess.run([config['jules']['binary'], '--help'], text=True,
+                                capture_output=True, timeout=30, env=environment)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise Error('Jules CLI cannot start under the configured runtime_bin') from error
+    (directory/'startup.stdout').write_text(result.stdout)
+    (directory/'startup.stderr').write_text(result.stderr)
+    if result.returncode or 'A CLI for Jules' not in result.stdout:
+        raise Error('Jules CLI cannot start under the configured runtime_bin; inspect private startup output')
+    return {'cli_startup_verified': True}
+
+
 class JulesCLI:
     def __init__(self, config):
         self.config = config

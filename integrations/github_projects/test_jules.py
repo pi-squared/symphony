@@ -2,6 +2,8 @@
 from copy import deepcopy
 from pathlib import Path
 import subprocess
+import json
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -125,6 +127,25 @@ class RoutingTests(unittest.TestCase):
 
 
 class CLITests(unittest.TestCase):
+    def test_supervisor_rejects_missing_cli_runtime_before_any_worker_starts(self):
+        import launch
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'config.json'
+            path.write_text(json.dumps({'state_directory': directory, 'enabled': False,
+                'runtime_bin': [], 'symphony': '/configured/symphony', 'workflow': '/configured/WORKFLOW.md',
+                'jules': {'enabled': True, 'binary': '/configured/jules'}}))
+            failed = subprocess.CompletedProcess([], 1, '', "Cannot find module 'fs/promises'")
+            with patch('sys.argv', ['launch', '--config', str(path)]), \
+                    patch.object(jules.subprocess, 'run', return_value=failed) as probe, \
+                    patch.object(launch.os, 'chdir'), \
+                    patch.object(launch.subprocess, 'Popen') as start:
+                with self.assertRaises(c.Error):
+                    launch.main()
+                start.assert_not_called()
+                self.assertEqual(probe.call_args.kwargs['env']['PATH'],
+                                 launch.worker_environment({'runtime_bin': []}, path.parent)['PATH'])
+            self.assertIn('fs/promises', (Path(directory)/'jules/runtime/startup.stderr').read_text())
+
     def test_zero_exit_api_error_is_not_submission_success(self):
         cli = jules.JulesCLI({'jules': {'binary': 'jules'}})
         with patch.object(cli, 'invoke', return_value='API error: 401'):
