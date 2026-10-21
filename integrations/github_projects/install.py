@@ -94,6 +94,9 @@ def validate_settings(settings):
         raise ValueError("Configure seven distinct nonempty lifecycle roles")
     if type(settings.get("max_concurrent_agents", 1)) is not int or settings.get("max_concurrent_agents", 1) < 1:
         raise ValueError("max_concurrent_agents must be positive")
+    for key in ("model", "reasoning", "rework_model", "rework_reasoning"):
+        if key in settings and (not isinstance(settings[key], str) or not settings[key].strip()):
+            raise ValueError(key + " must be a nonempty string")
     patterns = browser.get("required_paths", [])
     if not isinstance(patterns, list) or any(not isinstance(p, str) for p in patterns):
         raise ValueError("Browser required_paths must be a list of patterns")
@@ -192,7 +195,11 @@ def install_stopped(destination, settings):
         elif value.startswith("model_reasoning_effort="):
             command[i] = "model_reasoning_effort=" + json.dumps(config["reasoning"])
     command[0] = str(codex)
-    policy["codex"]["command"] = shlex.join(command)
+    config["codex_argv"] = command
+    config["rework_model"] = settings.get("rework_model", "gpt-6.1-sol")
+    config["rework_reasoning"] = settings.get("rework_reasoning", "xhigh")
+    policy["codex"]["command"] = shlex.join([
+        str(python), str(current / "controller/worker.py"), "--config", str(config_path)])
     policy["validation"]["required_checks"] = config["required_checks"]
     policy["server"]["port"] = config["port"]
     # Role placeholders keep the same prompt usable with renamed board states.

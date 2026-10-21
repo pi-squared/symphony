@@ -79,7 +79,12 @@ repository's contributor skills. Existing target-repository skills are preserved
 Defaults are one worker, 30-second polling, 20 turns, five-minute maximum retry
 backoff, `gpt-6.1-sol` with medium reasoning, and the named `symphony` permission
 profile. `max_concurrent_agents`, `model` and `reasoning` are configurable.
-Preflight checks the selected model, profile, dynamic-tool protocol and actual
+Explicit human Rework starts a fresh cycle using `rework_model: gpt-6.1-sol`
+and `rework_reasoning: xhigh`. Settings are persisted with that cycle, so retries
+and resumption after the board returns to In progress keep xhigh. Ordinary work
+keeps the installation's existing model/reasoning. The bound worker launcher
+uses actual CLI configuration, not prompt instructions.
+Preflight checks both ordinary and Rework settings, profile, dynamic-tool protocol and actual
 Git writes without starting a model turn. Enabling admission requires a receipt
 matching the installed release and workflow.
 

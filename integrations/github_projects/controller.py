@@ -61,6 +61,11 @@ def verify_preflight(config_path):
     receipt = json.loads(path.read_text())
     installed = json.loads((config_path.parent/"installed.json").read_text())
     digest = hashlib.sha256(Path(config["workflow"]).read_bytes()).hexdigest()
+    from worker import execution_settings
+    rework = receipt.get("rework", {})
+    if (any(rework.get(key) != value for key, value in execution_settings(config, rework=True).items())
+            or not rework.get("protocol_verified") or not rework.get("git_verified")):
+        raise Error("Run preflight for both ordinary and Rework settings")
     if (receipt.get("installation_identity") != installed["identity"] or receipt.get("workflow_sha256") != digest
             or not receipt.get("protocol_verified") or receipt.get("model") != config.get("model", "gpt-6.1-sol")
             or receipt.get("reasoning") != config.get("reasoning", "medium") or not receipt.get("git_verified")):
@@ -501,6 +506,12 @@ class Controller:
                 phase="claiming", workspace=str(path), started_at=now(),
                 **({"pr_number": pr["number"], "pr_url": pr["html_url"], "published_sha": pr["head"]["sha"]} if pr else {}),
                 **({"previous_cycle": previous} if previous and not pr else {}))
+        # The execution choice belongs to the cycle, not the transient board
+        # state. Rework switches to working after acknowledgment; retries must
+        # retain its requested model/effort.
+        if not record.get("execution"):
+            from worker import execution_settings
+            record = self.state.save(item_id, execution=execution_settings(self.config, rework=role == "rework"))
         self.ensure_checkout(task, record, path)
         if role == "rework":
             self.state.save(item_id, phase="rework")
@@ -580,6 +591,7 @@ class Controller:
                     if not (c.get("body") or "").startswith(MARKER)]
         result = {"issue": issue, "discussion": comments, "branch": task.branch,
                   "phase": record["phase"], "cycle": record.get("cycle", 1),
+                  "execution": record.get("execution"),
                   "repository": task.repository, "base_branch": self.base_branch,
                   "project_owner": self.config["project_owner"], "project_number": self.config["project_number"],
                   "required_checks": self.policy["validation"]["required_checks"], "fields": self.field_names,

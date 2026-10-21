@@ -14,15 +14,18 @@ import threading
 from controller import private_json
 
 
-def verify(config_path):
+def verify_profile(config_path, *, rework=False):
     config_path = Path(config_path)
     config = json.loads(config_path.read_text())
     workflow_bytes = Path(config["workflow"]).read_bytes()
     workflow = json.loads(workflow_bytes.decode().split("---", 2)[1])
-    model_name = config.get("model", "gpt-6.1-sol")
-    reasoning = config.get("reasoning", "medium")
+    from worker import execution_settings
+    settings = execution_settings(config, rework=rework)
+    model_name, reasoning = settings["model"], settings["reasoning"]
     messages = queue.Queue()
     command = shlex.split(workflow["codex"]["command"])
+    if rework:
+        command.append("--rework-preflight")
     with tempfile.TemporaryDirectory(prefix=".preflight-", dir=config["workspace_root"]) as workspace:
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                    stderr=subprocess.DEVNULL, text=True, bufsize=1, cwd=workspace)
@@ -104,6 +107,13 @@ def verify(config_path):
                "model": model_name, "reasoning": reasoning, "protocol_verified": True,
                "approval_policy": workflow["codex"]["approval_policy"], "model_turns_started": 0,
                "permissions": permissions, "git_verified": bool(permissions)}
+    return receipt
+
+
+def verify(config_path):
+    config = json.loads(Path(config_path).read_text())
+    receipt = verify_profile(config_path)
+    receipt["rework"] = verify_profile(config_path, rework=True)
     private_json(Path(config["state_directory"])/"preflight.json", receipt)
     return receipt
 
