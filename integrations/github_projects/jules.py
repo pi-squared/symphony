@@ -232,10 +232,12 @@ class JulesWorker:
             import shutil
             temporary_index = directory/'source.index'
             shutil.copyfile(path/'.git/index', temporary_index)
-            environment = {**support.github_environment(), 'GIT_INDEX_FILE': str(temporary_index)}
-            subprocess.run(['git', 'update-index', '--force-remove', '--', '.symphony-jules-report.json'],
-                           cwd=path, env=environment, check=True, capture_output=True)
-            source_tree = subprocess.check_output(['git', 'write-tree'], cwd=path, env=environment, text=True).strip()
+            import host_git
+            argv, environment = host_git.prepare(['update-index', '--force-remove', '--', '.symphony-jules-report.json'], cwd=path)
+            environment['GIT_INDEX_FILE'] = str(temporary_index)
+            subprocess.run(argv, cwd=path, env=environment, check=True, capture_output=True)
+            argv, _ = host_git.prepare(['write-tree'], cwd=path)
+            source_tree = subprocess.check_output(argv, cwd=path, env=environment, text=True).strip()
             self.save(item_id, source_tree=source_tree)
             support.run(['git', 'rm', '--force', '--', '.symphony-jules-report.json'], cwd=path)
             self.save(item_id, phase='applied', tree=browser.git(path, 'write-tree'))
@@ -267,7 +269,8 @@ class JulesWorker:
             state = c.state.get(item_id)['jules']
             remote = c.gh.remote_head(task.repository, task.branch)
             if remote is None:
-                support.run(['git', 'push', '-u', 'origin', task.branch], cwd=path, timeout=240)
+                support.run(['git', 'push', 'https://github.com/' + task.repository + '.git',
+                             state['sha'] + ':refs/heads/' + task.branch], cwd=path, timeout=240)
             elif remote != state['sha']:
                 raise Error('Jules branch changed remotely; refusing overwrite')
             if c.gh.remote_head(task.repository, task.branch) != state['sha']:

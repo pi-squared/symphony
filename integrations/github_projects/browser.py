@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import signal
 import subprocess
+import host_git
 import sys
 import uuid
 from fnmatch import fnmatchcase
@@ -54,7 +55,7 @@ def write_json(path, data):
 
 
 def git(workspace, *args):
-    return subprocess.check_output(["git", *args], cwd=workspace).decode().strip()
+    return host_git.output(workspace, *args).decode().strip()
 
 
 def inventory(workspace):
@@ -64,8 +65,7 @@ def inventory(workspace):
     invalidate them. Ignored build/dependency outputs are never source inputs.
     """
     root = Path(workspace).resolve()
-    names = subprocess.check_output(["git", "ls-files", "--cached", "--others",
-                                     "--exclude-standard", "-z"], cwd=root).decode().split("\0")
+    names = host_git.output(root, "ls-files", "--cached", "--others", "--exclude-standard", "-z").decode().split("\0")
     entries = {}
     for name in sorted(set(filter(None, names))):
         if Path(name).suffix.lower() in VIDEO_SUFFIXES:
@@ -86,10 +86,8 @@ def reject_video_changes(workspace, base="origin/main"):
     # Check the complete prospective PR, including committed changes and the
     # working tree. Deleted historical videos are explicitly permitted.
     merge_base = git(workspace, "merge-base", base, "HEAD")
-    names = subprocess.check_output(["git", "diff", "--name-only", "--diff-filter=ACMRT",
-                                     "-z", merge_base], cwd=workspace).decode().split("\0")
-    names += subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard",
-                                      "-z"], cwd=workspace).decode().split("\0")
+    names = host_git.output(workspace, "diff", "--no-ext-diff", "--name-only", "--diff-filter=ACMRT", "-z", merge_base).decode().split("\0")
+    names += host_git.output(workspace, "ls-files", "--others", "--exclude-standard", "-z").decode().split("\0")
     for name in filter(None, names):
         path = Path(workspace) / name
         if path.suffix.lower() in VIDEO_SUFFIXES:

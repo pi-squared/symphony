@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import host_git
 from urllib.parse import urlencode
 
 
@@ -144,7 +145,10 @@ def github_environment() -> dict[str, str]:
 
 def run(command: list[str], *, cwd: Path | None = None, timeout: int = 120,
         input_text: str | None = None) -> str:
-    result = subprocess.run(command, cwd=cwd, env=github_environment(),
+    env = github_environment()
+    if command[0] == "git":
+        command, env = host_git.prepare(command[1:], cwd=cwd, env=env, gh="gh")
+    result = subprocess.run(command, cwd=cwd, env=env,
                             input=input_text, capture_output=True, text=True,
                             timeout=timeout)
     if result.returncode:

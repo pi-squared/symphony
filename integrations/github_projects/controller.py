@@ -745,7 +745,8 @@ class Controller:
         if origin != "https://github.com/" + task.repository:
             raise Error("The Git origin changed from the bound repository")
         if action == "fetch":
-            support.run(["git", "fetch", "origin", self.base_branch], cwd=path, timeout=240)
+            support.run(["git", "fetch", "https://github.com/" + task.repository + ".git",
+                         "refs/heads/" + self.base_branch + ":refs/remotes/origin/" + self.base_branch], cwd=path, timeout=240)
             return {"base_ref": self.base_ref, "sha": browser.git(path, "rev-parse", self.base_ref)}
         if action != "push":
             raise Error("Git remote action must be fetch or push")
@@ -754,7 +755,8 @@ class Controller:
         if browser.git(path, "status", "--porcelain"):
             raise Error("Commit scoped source changes before pushing")
         if self.gh.remote_head(task.repository, task.branch) != sha:
-            support.run(["git", "push", "-u", "origin", task.branch], cwd=path, timeout=240)
+            support.run(["git", "push", "https://github.com/" + task.repository + ".git",
+                         sha + ":refs/heads/" + task.branch], cwd=path, timeout=240)
         if self.gh.remote_head(task.repository, task.branch) != sha:
             raise Error("GitHub did not confirm the selected issue commit")
         return {"branch": task.branch, "sha": sha, "remote_verified": True}
