@@ -332,8 +332,8 @@ class Controller:
 
     def backend_for(self, item):
         record = self.state.get(item["id"]) or {}
-        from jules import remote_active
-        if remote_active(record):
+        from jules import owns_cycle
+        if owns_cycle(record):
             return "jules"
         if self.role(item) in {"rework", "merging"}:
             return "codex"
@@ -467,9 +467,12 @@ class Controller:
                     payload={"body": MARKER + f"\n<!-- symphony-github-projects-cycle:{record.get('cycle', 1)} -->\n" + body})
         return {"comment_id": record["comment_id"]}
 
-    def claim(self, item_id, workspace, *, new_attempt=False, backend="codex"):
+    def claim_lock(self, item_id):
         directory = Path(self.config["state_directory"])/"claim-locks"/hashlib.sha256(item_id.encode()).hexdigest()
-        with controller_lock(directory):
+        return controller_lock(directory)
+
+    def claim(self, item_id, workspace, *, new_attempt=False, backend="codex"):
+        with self.claim_lock(item_id):
             return self._claim(item_id, workspace, new_attempt=new_attempt, backend=backend)
 
     def _claim(self, item_id, workspace, *, new_attempt=False, backend="codex"):

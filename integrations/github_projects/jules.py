@@ -61,8 +61,13 @@ class JulesCLI:
         return output
 
 
-def remote_active(record):
-    return (record or {}).get('jules', {}).get('phase') in REMOTE_ACTIVE
+def owns_cycle(record):
+    record = record or {}
+    return record.get('backend') == 'jules' and record.get('jules', {}).get('phase') not in TERMINAL
+
+
+class Superseded(Exception):
+    pass
 
 
 class JulesWorker:
@@ -112,6 +117,29 @@ class JulesWorker:
         return self.advance(c.state.get(item['id']))
 
     def advance(self, record):
+        c = self.controller
+        item_id = record['task']['item_id']
+        with c.claim_lock(item_id):
+            current = c.state.get(item_id)
+            if not current or current.get('cycle') != record.get('cycle') or current.get('backend') != 'jules':
+                return 'superseded'
+            try:
+                return self._advance(current)
+            except Superseded:
+                return 'superseded'
+
+    def require_working(self, record):
+        c = self.controller
+        item_id = record['task']['item_id']
+        current = c.state.get(item_id)
+        if not current or current.get('cycle') != record.get('cycle') or current.get('backend') != 'jules':
+            raise Superseded()
+        _, item, _ = c.find(item_id)
+        if c.role(item) != 'working':
+            self.save(item_id, phase='superseded')
+            raise Superseded()
+
+    def _advance(self, record):
         c = self.controller
         item_id = record['task']['item_id']
         _, items = c.snapshot()
@@ -172,6 +200,7 @@ class JulesWorker:
         _, item, task = c.find(item_id)
         state = c.state.get(item_id)['jules']
         if phase in {'patch_ready', 'applying'}:
+            self.require_working(record)
             patch = directory/'result.patch'
             if hashlib.sha256(patch.read_bytes()).hexdigest() != state['patch_sha256']:
                 raise Error('The retained Jules patch changed')
@@ -221,6 +250,7 @@ class JulesWorker:
             self.save(item_id, phase='committing')
             phase = 'committing'
         if phase == 'committing':
+            self.require_working(record)
             state = c.state.get(item_id)['jules']
             head = browser.git(path, 'rev-parse', 'HEAD')
             if head == state['starting_head']:
@@ -233,6 +263,7 @@ class JulesWorker:
             self.save(item_id, phase='pushing', sha=sha)
             phase = 'pushing'
         if phase == 'pushing':
+            self.require_working(record)
             state = c.state.get(item_id)['jules']
             remote = c.gh.remote_head(task.repository, task.branch)
             if remote is None:
@@ -244,6 +275,7 @@ class JulesWorker:
             self.save(item_id, phase='publishing')
             phase = 'publishing'
         if phase == 'publishing':
+            self.require_working(record)
             state = c.state.get(item_id)['jules']
             prs = [pr for pr in c.gh.issue_prs(task) if pr['head']['ref'] == task.branch and pr['state'] == 'open']
             if len(prs) > 1:

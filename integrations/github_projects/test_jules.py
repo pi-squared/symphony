@@ -98,6 +98,31 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(cli.submissions, 1)
         self.assertEqual(self.controller.state.get('item-3')['jules']['session_id'], '101')
 
+    def test_rework_during_every_publication_phase_waits_for_safe_supersession(self):
+        self.settings()
+        self.prepare_checkout()
+        for phase in ('patch_ready', 'applying', 'applied', 'committing', 'pushing', 'publishing', 'checks'):
+            with self.subTest(phase=phase):
+                self.record(backend='jules', jules={'phase': phase})
+                self.gh.status({}, 'item-3', 'Rework')
+                self.assertFalse(self.controller.eligible(self.gh.items[0]))
+                worker = self.worker(FakeCLI())
+                with patch.object(c.support, 'run', side_effect=AssertionError('Must not mutate old checkout')):
+                    self.assertEqual(worker.tick(), 'superseded')
+                self.assertTrue(self.controller.eligible(self.gh.items[0]))
+                self.assertEqual((self.path/'hello.py').read_text(), 'print("hello")\n')
+
+    def test_stale_jules_snapshot_cannot_write_into_new_codex_cycle(self):
+        self.settings()
+        self.record(backend='jules', jules={'phase': 'pushing'})
+        old = self.controller.state.get('item-3')
+        self.controller.state.save('item-3', backend='codex', cycle=2, jules={})
+        worker = self.worker(FakeCLI())
+        with patch.object(c.support, 'run', side_effect=AssertionError('No cross-cycle mutation')):
+            self.assertEqual(worker.advance(old), 'superseded')
+        self.assertEqual(self.controller.state.get('item-3')['backend'], 'codex')
+        self.assertEqual(self.controller.state.get('item-3')['cycle'], 2)
+
 
 class CLITests(unittest.TestCase):
     def test_zero_exit_api_error_is_not_submission_success(self):
