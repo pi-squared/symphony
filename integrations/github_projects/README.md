@@ -246,6 +246,13 @@ commits, pushes without force and verifies the remote SHA. It discovers or creat
 one exact-branch draft PR; interrupted application, commit, push and publication
 have recorded recovery points. Raw CLI output, prompts, patches and reports stay
 under private state, outside the issue checkout and source repository.
+The CLI can return a patch relative to the repository's default branch after a
+task switches to a selected feature base. The controller records that default
+baseline before dispatch. If direct application fails, it reconstructs the full
+returned tree in a private Git index and compares it with the recorded task
+base. Every net source change remains subject to the ordinary scope and checks;
+existing base changes are not republished. Both raw and normalized patches are
+retained with hashes. Unrecognized or missing baselines remain gated.
 
 Current-head CI and the existing application-evidence gates still govern entry
 to In review. Missing browser evidence or unresolved PR feedback retains the work

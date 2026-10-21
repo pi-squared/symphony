@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import re
 import subprocess
+import tempfile
 import time
 
 from controller import Controller, Error, MARKER, Task, controller_lock, now, private_json
@@ -34,6 +35,24 @@ def validate_runtime(config, environment):
     if result.returncode or 'A CLI for Jules' not in result.stdout:
         raise Error('Jules CLI cannot start under the configured runtime_bin; inspect private startup output')
     return {'cli_startup_verified': True}
+
+
+def normalize_patch(path, patch, selected_base, cli_base, directory):
+    """Reconstruct the complete returned tree, retaining every net change."""
+    import host_git
+    if not all(re.fullmatch(r'[0-9a-f]{40}', sha or '') for sha in (selected_base, cli_base)):
+        raise Error('Patch normalization requires recorded full base commits')
+    with tempfile.TemporaryDirectory(dir=directory) as temporary:
+        index = str(Path(temporary)/'index')
+        def git(*args):
+            argv, environment = host_git.prepare(args, cwd=path)
+            environment['GIT_INDEX_FILE'] = index
+            return subprocess.check_output(argv, cwd=path, env=environment, stderr=subprocess.PIPE)
+        git('read-tree', cli_base)
+        git('apply', '--cached', '--check', str(patch))
+        git('apply', '--cached', str(patch))
+        tree = git('write-tree').decode().strip()
+        return git('diff', '--no-ext-diff', '--no-textconv', '--binary', '--full-index', selected_base, tree, '--').decode()
 
 
 class JulesCLI:
@@ -175,6 +194,14 @@ class JulesWorker:
             if c.role(item) != 'working':
                 raise Error('Jules issue left the working state before submission')
             issue = c.gh.issue(task)
+            # CLI pull compares to the repository default branch even if the
+            # task switches to a selected feature base. Capture that clone's
+            # trusted baseline before the remote can modify any source.
+            try:
+                cli_base = browser.git(path, 'rev-parse', '--verify', '--quiet', 'refs/remotes/origin/HEAD')
+            except subprocess.CalledProcessError:
+                cli_base = record['base_sha']
+            self.save(item_id, patch_base_sha=cli_base)
             comments = [row.get('body', '') for row in c.gh.pages(f'repos/{task.repository}/issues/{task.number}/comments')]
             prompt = (f"Implement {task.url} in {task.repository}. Start from {c.base_branch} at {record['base_sha']}.\n"
                       f"Work cycle {task.cycle}; intended branch {task.branch}.\n"
@@ -217,13 +244,24 @@ class JulesWorker:
         state = c.state.get(item_id)['jules']
         if phase in {'patch_ready', 'applying'}:
             self.require_working(record)
-            patch = directory/'result.patch'
+            patch = directory/state.get('patch_file', 'result.patch')
             if hashlib.sha256(patch.read_bytes()).hexdigest() != state['patch_sha256']:
                 raise Error('The retained Jules patch changed')
             if phase == 'patch_ready':
                 if browser.git(path, 'status', '--porcelain'):
                     raise Error('Jules patch application requires its unchanged clean checkout')
-                support.run(['git', 'apply', '--check', str(patch)], cwd=path)
+                try:
+                    support.run(['git', 'apply', '--check', str(patch)], cwd=path)
+                except Error:
+                    if state.get('patch_file') or state.get('patch_base_sha') in {None, record['base_sha']}:
+                        raise
+                    normalized = normalize_patch(path, patch, record['base_sha'], state['patch_base_sha'], directory)
+                    retained = directory/'normalized.patch'
+                    retained.write_text(normalized)
+                    self.save(item_id, patch_file=retained.name, raw_patch_sha256=state['patch_sha256'],
+                              patch_sha256=hashlib.sha256(normalized.encode()).hexdigest())
+                    patch = retained
+                    support.run(['git', 'apply', '--check', str(patch)], cwd=path)
                 self.save(item_id, phase='applying', starting_head=browser.git(path, 'rev-parse', 'HEAD'))
                 support.run(['git', 'apply', '--index', str(patch)], cwd=path)
             else:

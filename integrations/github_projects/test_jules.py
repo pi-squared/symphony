@@ -169,6 +169,29 @@ class PublicationTests(unittest.TestCase):
     worker = RoutingTests.worker
     prepare_checkout = RoutingTests.prepare_checkout
 
+    def test_default_branch_patch_is_rebased_without_dropping_net_source_changes(self):
+        self.checkout()
+        cli_base = self.git('rev-parse', 'HEAD')
+        (self.path/'inherited.txt').write_text('selected base implementation\n')
+        self.git('add', '--', 'inherited.txt')
+        self.git('commit', '-qm', 'Selected feature base')
+        selected = self.git('rev-parse', 'HEAD')
+        (self.path/'guide.md').write_text('operator guide\n')
+        (self.path/'hello.py').write_text('print("unexpected net change")\n')
+        self.git('add', '--', 'guide.md', 'hello.py')
+        raw = self.root/'raw.patch'
+        raw.write_text(self.git('diff', '--cached', '--binary', '--full-index', cli_base)+'\n')
+        self.git('reset', '--hard', selected)
+        before = self.git('write-tree')
+        normalized = jules.normalize_patch(self.path, raw, selected, cli_base, self.root)
+        self.assertEqual(self.git('write-tree'), before)
+        self.assertEqual(self.git('status', '--porcelain'), '')
+        self.assertNotIn('diff --git a/inherited.txt', normalized)
+        self.assertIn('diff --git a/hello.py', normalized)
+        result = self.root/'normalized.patch';result.write_text(normalized)
+        self.git('apply', '--index', str(result))
+        self.assertEqual(set(self.git('diff', '--cached', '--name-only').splitlines()), {'guide.md', 'hello.py'})
+
     def test_completed_remote_patch_becomes_one_verified_draft_and_review(self):
         import json
         from controller import browser
