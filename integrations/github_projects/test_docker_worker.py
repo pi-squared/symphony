@@ -95,3 +95,21 @@ class DockerTests(unittest.TestCase):
             with self.assertRaises(d.DockerError):
                 d.repository_skills(self.workspace)
             alias.unlink()
+
+    def test_symlinked_catalog_and_skill_entries_cannot_escape_discovery_overrides(self):
+        target = self.workspace/'catalog/custom'
+        target.mkdir(parents=True)
+        (target/'SKILL.md').write_text('custom skill')
+        parent = self.workspace/'.agents';parent.mkdir()
+        catalog = parent/'skills';catalog.symlink_to(target.parent, target_is_directory=True)
+        with self.assertRaises(d.DockerError):
+            d.repository_skills(self.workspace)
+        self.assertTrue(catalog.is_symlink())  # Preserve tracked bytes and Git semantics.
+        catalog.unlink();catalog.mkdir()
+        entry = catalog/'linked';entry.symlink_to(target, target_is_directory=True)
+        with self.assertRaises(d.DockerError):
+            d.repository_skills(self.workspace)
+        entry.unlink();(catalog/'custom').mkdir()
+        (catalog/'custom/SKILL.md').symlink_to(target/'SKILL.md')
+        with self.assertRaises(d.DockerError):
+            d.repository_skills(self.workspace)

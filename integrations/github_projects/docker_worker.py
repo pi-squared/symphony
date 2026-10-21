@@ -63,14 +63,16 @@ def repository_skills(workspace):
     """Disable discovery while preserving tracked bytes and Git semantics."""
     paths = []
     for directory, names, files in os.walk(workspace, followlinks=False):
-        for name in ('.codex', '.agents'):
-            if (Path(directory)/name).is_symlink():
-                raise DockerError('Repository configuration parents must not be symlinks')
-        names[:] = [name for name in names if name not in {'.git', 'node_modules', '.venv', 'venv'}]
         parent = Path(directory)
+        for name in ('.codex', '.agents'):
+            if (parent/name).is_symlink():
+                raise DockerError('Repository configuration parents must not be symlinks')
+        if parent.name in {'.codex', '.agents'} and (parent/'skills').is_symlink():
+            raise DockerError('Repository skill catalogs must not be symlinks')
+        names[:] = [name for name in names if name not in {'.git', 'node_modules', '.venv', 'venv'}]
         if parent.name == 'skills' and parent.parent.name in {'.codex', '.agents'}:
-            if parent.is_symlink():
-                raise DockerError('Repository skill catalogs must not be symlinks')
+            if any(path.is_symlink() for path in parent.rglob('*')):
+                raise DockerError('Repository skill catalog entries must not be symlinks')
             paths.extend(path for path in parent.rglob('SKILL.md'))
     return sorted(set(paths))
 
