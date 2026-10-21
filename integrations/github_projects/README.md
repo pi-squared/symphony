@@ -181,3 +181,71 @@ Imported from `pi-squared/OpenContracts-Development` revision
 in this fork. Application-specific launchers, fixtures, assertions, journeys,
 deployment code and pilot issue 33 additions are excluded. Recording helper
 provenance is retained in `recording/provenance.json`.
+
+## Local Docker issue workers
+
+Set `docker.image` to an immutable local `sha256:...` image ID or registry
+`name@sha256:...`, with the complete Codex package at `/opt/codex/bin/codex`,
+Git, GitHub CLI and project build/test tools. The host's Docker daemon is never
+mounted into the worker. `docker.auth_file` selects a dedicated Codex auth cache;
+only that file seeds a private per-issue home. Refreshed credentials and sessions
+persist across retries. `docker.git_auth_file`, when configured, is a private
+repository-scoped GitHub CLI `hosts.yml`; board credentials remain on the host.
+An optional `ca_bundle` preserves the configured proxy's certificate trust.
+
+The issue checkout is mounted at the same absolute path, with the invoking
+UID/GID. The image root is read-only, capabilities are dropped, and default
+ceilings are 2 CPUs, 4 GiB and 512 processes. Docker Cloud is not used.
+Repository skill discovery is disabled through supported per-skill CLI overrides;
+project Codex configuration is untrusted. Tracked skill/config files remain intact
+for Git. Packaged system skills are extracted from the pinned image and mounted
+read-only, rather than trusted by a writable directory name. Preflight inspects the effective skill catalog.
+The existing Git, review, evidence and landing procedures become ordinary inline
+workflow instructions rather than installed skills. AGENTS.md remains readable.
+
+Independent checks use separate networkless containers without auth caches or
+Git credentials and with Git metadata read-only. Application browser workers
+continue to use the explicitly configured external worker contract; their
+application-specific environment remains the operator's responsibility.
+
+Container names and labels bind installation, issue workspace and cycle.
+Cancellation removes only matching owned containers. An exclusive per-workspace
+launcher lock prevents duplicate workers. Startup reconciles and removes orphaned
+containers from previous cycles before reusing the persistent checkout. Controller
+cleanup also removes owned containers. Failed Docker inspection blocks retries
+rather than assuming an orphan is gone. Enabling admission requires a preflight
+receipt bound to the actual executable/arguments and complete runtime settings.
+
+## Optional concurrent Jules worker
+
+Configure `jules` with `enabled: true`, the absolute official CLI `binary` path,
+and `label: "runner:jules"`. Sign in and authorize the exact target repository
+through Jules before enabling the installation. Labelled eligible Ready issues
+select Jules; other issues select Codex. Required labels, native blockers,
+assignee filtering and the configured repository/board still apply. The local
+supervisor runs one Jules companion alongside Symphony's configured Codex pool.
+Only different issues run concurrently; claim locks and persisted backend choices
+prevent duplicate ownership. Label edits affect future claims, not active cycles.
+
+The CLI's lack of idempotent submission requires a write-ahead `submitting`
+record. A lost or malformed response becomes `submission_unknown` and reserves
+ownership; the worker never resubmits it automatically. Inspect the exact private
+prompt and Jules session list to reconcile it. Stopping the local supervisor
+leaves remote sessions recorded; their existence is not inferred from local PIDs.
+A known remote session resumes polling after restart. Human Rework waits for a
+remote session to become terminal, then selects a fresh Sol/xhigh Codex cycle,
+even when the original issue retains the Jules label. Merging also uses Codex.
+
+Jules returns a patch and a structured temporary handoff. The host checks it in
+its isolated issue checkout, removes the handoff file, runs independent checks,
+commits, pushes without force and verifies the remote SHA. It discovers or creates
+one exact-branch draft PR; interrupted application, commit, push and publication
+have recorded recovery points. Raw CLI output, prompts, patches and reports stay
+under private state, outside the issue checkout and source repository.
+
+Current-head CI and the existing application-evidence gates still govern entry
+to In review. Missing browser evidence or unresolved PR feedback retains the work
+and records an operational error; it does not waive validation or trigger an
+unrequested duplicate attempt. The CLI's plan/input requests remain visible in
+its remote status. The companion does not merge or deploy; only existing human
+Rework and Merging transitions authorize those lifecycle routes.

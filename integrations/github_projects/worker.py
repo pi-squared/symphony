@@ -1,15 +1,21 @@
 """Launch the configured issue worker with durable per-cycle model settings."""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
-import shlex
-import sys
 
 
 def execution_settings(config, *, rework=False):
     return {"model": config.get("rework_model", "gpt-6.1-sol") if rework else config.get("model", "gpt-6.1-sol"),
             "reasoning": config.get("rework_reasoning", "xhigh") if rework else config.get("reasoning", "medium")}
+
+
+def execution_fingerprint(config):
+    # Admission switches deliberately do not change execution. Every other
+    # setting (including argv, image, auth selectors and check commands) does.
+    bound = {key: value for key, value in config.items() if key not in {"enabled", "only_issue"}}
+    return hashlib.sha256(json.dumps(bound, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def bound_record(config, workspace):
@@ -34,6 +40,11 @@ def codex_command(config, record=None, *, rework=False):
             command[index] = "model=" + json.dumps(settings["model"])
         elif value.startswith("model_reasoning_effort="):
             command[index] = "model_reasoning_effort=" + json.dumps(settings["reasoning"])
+        elif config.get("docker") and value.startswith("permissions.symphony.filesystem="):
+            # Docker is the execution boundary. Nested unprivileged namespaces
+            # are unavailable on ordinary Docker hosts; the read-only image and
+            # explicit mounts still enforce filesystem access in the container.
+            command[index] = 'permissions.symphony.filesystem={":root"="write"}'
     return command
 
 

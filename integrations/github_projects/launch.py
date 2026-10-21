@@ -4,6 +4,10 @@ import argparse
 import fcntl
 import json
 import os
+import signal
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 from controller import verify_preflight
@@ -41,7 +45,32 @@ def main():
     command = [config["symphony"], "--i-understand-that-this-will-be-running-without-the-usual-guardrails",
                "--logs-root", str(args.config.parent / "logs"), config["workflow"]]
     os.chdir(args.config.parent)
-    os.execvpe(command[0], command, environment)
+    if not config.get("jules", {}).get("enabled"):
+        os.execvpe(command[0], command, environment)
+    processes = [subprocess.Popen(command, env=environment, start_new_session=True),
+                 subprocess.Popen([config["python"], str(Path(__file__).with_name("jules.py")),
+                                   "--config", str(args.config)], env=environment, start_new_session=True)]
+    stopping = False
+    def stop(signum, frame):
+        nonlocal stopping
+        stopping = True
+        for process in processes:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGTERM)
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, stop)
+    try:
+        while not stopping and all(process.poll() is None for process in processes):
+            time.sleep(0.25)
+    finally:
+        stop(None, None)
+        for process in processes:
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+    raise SystemExit(next((p.returncode for p in processes if p.returncode), 0))
 
 
 if __name__ == "__main__":

@@ -74,6 +74,22 @@ def validate_settings(settings):
     fields = settings.get("fields", {})
     if set(fields) - {"status", "priority", "execution_order"} or any(not isinstance(v, str) or not v.strip() for v in fields.values()):
         raise ValueError("Configure nonempty status, priority and execution_order field names")
+    jules = settings.get("jules")
+    if jules:
+        if not isinstance(jules, dict) or type(jules.get("enabled", False)) is not bool:
+            raise ValueError("Configure the optional Jules worker explicitly")
+        if jules.get("enabled") and not Path(jules.get("binary", "")).is_absolute():
+            raise ValueError("Configure an absolute installed Jules CLI path")
+        if not isinstance(jules.get("label", "runner:jules"), str) or not jules.get("label", "runner:jules").strip():
+            raise ValueError("Configure a nonempty Jules issue label")
+    docker = settings.get("docker")
+    if docker:
+        if not isinstance(docker, dict) or not isinstance(docker.get("image"), str):
+            raise ValueError("Docker workers require a pinned image")
+        if not docker["image"].startswith("sha256:") and "@sha256:" not in docker["image"]:
+            raise ValueError("Pin Docker image by ID or digest")
+        if not Path(docker.get("auth_file", "")).is_absolute():
+            raise ValueError("Configure a dedicated absolute Codex auth_file")
     browser = settings.get("browser", {})
     if browser:
         if not isinstance(browser.get("scenarios"), list) or not browser["scenarios"]:
@@ -205,6 +221,15 @@ def install_stopped(destination, settings):
     # Role placeholders keep the same prompt usable with renamed board states.
     for role, value in roles.items():
         body = body.replace("__ROLE_" + role.upper() + "__", value)
+    if config.get("docker"):
+        # The operational procedures remain ordinary task instructions. No
+        # downloaded skill catalog is installed into the issue or worker home.
+        body = body.replace(".codex/skills/land/SKILL.md", "the embedded land procedure")
+        body = body.replace("skill", "procedure").replace("Skill", "Procedure")
+        body += "\n\n## Embedded operating procedures\n\n"
+        for source in sorted((HERE / "templates/skills").glob("*/SKILL.md")):
+            body += "\n### " + source.parent.name + "\n" + source.read_text().split("---", 2)[-1]
+        body += "\nUse packaged OpenAI skills only. Keep additional skill catalogs uninstalled.\n"
     workflow = "---\n" + json.dumps(policy, indent=2) + "\n---" + body
     (release / "WORKFLOW.md").write_text(workflow)
     ledger = Ledger(config["state_directory"])

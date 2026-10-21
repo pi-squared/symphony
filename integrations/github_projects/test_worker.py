@@ -1,6 +1,8 @@
 """Observable cycle selection, including retry after leaving Rework."""
 from pathlib import Path
 import tempfile
+import json
+import hashlib
 import unittest
 from unittest.mock import patch
 
@@ -49,3 +51,29 @@ class CommandTests(unittest.TestCase):
         self.assertIn('model="gpt-6.1-sol"', command)
         self.assertIn('model_reasoning_effort="xhigh"', command)
         self.assertIn('permissions.symphony.network.enabled=true', command)
+
+
+class ReceiptTests(unittest.TestCase):
+    def test_execution_argv_or_runtime_change_invalidates_preflight(self):
+        from worker import execution_fingerprint
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workflow = root / 'WORKFLOW.md'
+            workflow.write_text('selected workflow')
+            config = {'state_directory': str(root), 'workflow': str(workflow),
+                      'codex_argv': ['codex', 'app-server'], 'enabled': False}
+            config_path = root / 'config.json'
+            config_path.write_text(json.dumps(config))
+            (root/'installed.json').write_text(json.dumps({'identity': 'selected'}))
+            receipt = {'installation_identity': 'selected', 'workflow_sha256': hashlib.sha256(workflow.read_bytes()).hexdigest(),
+                       'execution_sha256': execution_fingerprint(config), 'protocol_verified': True,
+                       'model': 'gpt-6.1-sol', 'reasoning': 'medium', 'git_verified': True,
+                       'rework': {'model': 'gpt-6.1-sol', 'reasoning': 'xhigh', 'protocol_verified': True, 'git_verified': True}}
+            (root/'preflight.json').write_text(json.dumps(receipt))
+            c.verify_preflight(config_path)
+            for changes in ({'codex_argv': ['other-binary', 'app-server']}, {'docker': {'image': 'different'}}):
+                config_path.write_text(json.dumps({**config, **changes}))
+                with self.assertRaises(c.Error):
+                    c.verify_preflight(config_path)
+            config_path.write_text(json.dumps({**config, 'enabled': True, 'only_issue': 3}))
+            c.verify_preflight(config_path)

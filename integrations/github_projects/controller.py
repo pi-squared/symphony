@@ -61,7 +61,9 @@ def verify_preflight(config_path):
     receipt = json.loads(path.read_text())
     installed = json.loads((config_path.parent/"installed.json").read_text())
     digest = hashlib.sha256(Path(config["workflow"]).read_bytes()).hexdigest()
-    from worker import execution_settings
+    from worker import execution_settings, execution_fingerprint
+    if receipt.get("execution_sha256") != execution_fingerprint(config):
+        raise Error("Worker execution configuration changed; rerun preflight")
     rework = receipt.get("rework", {})
     if (any(rework.get(key) != value for key, value in execution_settings(config, rework=True).items())
             or not rework.get("protocol_verified") or not rework.get("git_verified")):
@@ -328,7 +330,22 @@ class Controller:
             raise Error("The recorded PR no longer matches Symphony's branch and repository")
         return pr
 
-    def eligible(self, item):
+    def backend_for(self, item):
+        record = self.state.get(item["id"]) or {}
+        from jules import remote_active
+        if remote_active(record):
+            return "jules"
+        if self.role(item) in {"rework", "merging"}:
+            return "codex"
+        if record:
+            return record.get("backend", "codex")
+        settings = self.config.get("jules", {})
+        labels = {row["name"].lower() for row in item["content"]["labels"]["nodes"]}
+        return "jules" if settings.get("enabled") and settings.get("label", "runner:jules").lower() in labels else "codex"
+
+    def eligible(self, item, *, backend="codex"):
+        if self.backend_for(item) != backend:
+            return False
         if not self.config["enabled"] or not self.routed(item):
             return False
         role = self.role(item)
@@ -405,6 +422,7 @@ class Controller:
         issue = self.gh.issue(task)
         labels = {label["name"].strip().lower() for label in issue["labels"]}
         status = self.gh.item_status(item_id)
+        item["content"]["labels"]["nodes"] = issue["labels"]
         if issue["state"] != "open" or not set(self.tracker.get("required_labels", [])).issubset(labels) or status is None:
             raise Error("The issue was closed, unlabelled, archived, or removed before this operation")
         for value in item["fieldValues"]["nodes"]:
@@ -449,7 +467,12 @@ class Controller:
                     payload={"body": MARKER + f"\n<!-- symphony-github-projects-cycle:{record.get('cycle', 1)} -->\n" + body})
         return {"comment_id": record["comment_id"]}
 
-    def claim(self, item_id, workspace, *, new_attempt=False):
+    def claim(self, item_id, workspace, *, new_attempt=False, backend="codex"):
+        directory = Path(self.config["state_directory"])/"claim-locks"/hashlib.sha256(item_id.encode()).hexdigest()
+        with controller_lock(directory):
+            return self._claim(item_id, workspace, new_attempt=new_attempt, backend=backend)
+
+    def _claim(self, item_id, workspace, *, new_attempt=False, backend="codex"):
         if not self.config["enabled"]:
             raise Error("Symphony admission is paused")
         project, item, task = self.find(item_id)
@@ -458,8 +481,8 @@ class Controller:
         role = self.role(item)
         if role == "review" and record:
             return self.context(task, record)
-        if not self.eligible(item):
-            raise Error("The issue is not eligible for Symphony")
+        if not self.eligible(item, backend=backend):
+            raise Error("The issue is not eligible for this Symphony backend")
         pr = self.owned_pr(task, record) if record and record.get("pr_number") else None
         restart = bool(record and ((role == "rework" and record.get("phase") != "rework")
                        or (role == "queued" and pr and pr["state"] != "open")))
@@ -509,6 +532,8 @@ class Controller:
         # The execution choice belongs to the cycle, not the transient board
         # state. Rework switches to working after acknowledgment; retries must
         # retain its requested model/effort.
+        if not record.get("backend"):
+            record = self.state.save(item_id, backend=backend)
         if not record.get("execution"):
             from worker import execution_settings
             record = self.state.save(item_id, execution=execution_settings(self.config, rework=role == "rework"))
@@ -572,7 +597,7 @@ class Controller:
         support.run(["git", "config", "--local", "credential.helper", "!" + shlex.quote(gh) + " auth git-credential"], cwd=path)
         self.state.save(task.item_id, base_sha=record.get("base_sha") or browser.git(path, "merge-base", self.base_ref, "HEAD"))
         skill_source = Path(__file__).resolve().parent / "templates/skills"
-        if skill_source.exists():
+        if skill_source.exists() and not self.config.get("docker"):
             target = path / ".codex/skills"
             # Bootstrap skills into older application revisions, excluding them
             # from publication unless the issue deliberately tracks them.
@@ -665,7 +690,11 @@ class Controller:
 
     def independent_checks(self, task, path, report):
         evidence = []
-        sandbox = runtime.Sandbox(self.config["runtime_roots"])
+        if self.config.get("docker"):
+            from docker_worker import DockerSandbox
+            sandbox = DockerSandbox(self.config)
+        else:
+            sandbox = runtime.Sandbox(self.config["runtime_roots"])
         for command in self.config["checks"]:
             argv = [str(self.config["python"]) if part == "{python}" else part for part in command]
             try:
@@ -781,6 +810,9 @@ class Controller:
 
     def cleanup(self, path, terminal=True):
         path = Path(path).resolve()
+        if self.config.get("docker"):
+            from docker_worker import stop_owned
+            stop_owned(self.config, path)
         record = next((r for r in self.state.all() if r.get("workspace") == str(path)), None)
         if not record:
             root = Path(self.config["workspace_root"]).resolve()
