@@ -137,6 +137,7 @@ class ControllerTests(unittest.TestCase):
         self.git('add', 'hello.py')
         self.git('commit', '-m', 'Base')
         self.git('update-ref', 'refs/remotes/origin/main', 'HEAD')
+        self.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main')
         sha = self.git('rev-parse', 'HEAD')
         self.record(base_sha=sha)
         self.gh.status({}, 'item-3', 'In progress')

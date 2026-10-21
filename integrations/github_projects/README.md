@@ -248,7 +248,7 @@ have recorded recovery points. Raw CLI output, prompts, patches and reports stay
 under private state, outside the issue checkout and source repository.
 The CLI can return a patch relative to the repository's default branch after a
 task switches to a selected feature base. The controller records that default
-baseline before dispatch. If direct application fails, it reconstructs the full
+baseline before dispatch. Whenever that baseline differs, it reconstructs the full
 returned tree in a private Git index and compares it with the recorded task
 base. Every net source change remains subject to the ordinary scope and checks;
 existing base changes are not republished. Both raw and normalized patches are

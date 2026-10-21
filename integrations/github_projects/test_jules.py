@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import json
 import tempfile
+import hashlib
 import unittest
 from unittest.mock import patch
 
@@ -100,6 +101,16 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(cli.submissions, 1)
         self.assertEqual(self.controller.state.get('item-3')['jules']['session_id'], '101')
 
+    def test_unknown_default_baseline_never_submits(self):
+        self.settings()
+        self.prepare_checkout()
+        self.git('symbolic-ref', '--delete', 'refs/remotes/origin/HEAD')
+        cli = FakeCLI()
+        with self.assertRaisesRegex(c.Error, 'baseline is unknown'):
+            self.worker(cli).tick()
+        self.assertEqual(cli.submissions, 0)
+        self.assertEqual(self.controller.state.get('item-3')['jules']['phase'], 'claimed')
+
     def test_rework_during_every_publication_phase_waits_for_safe_supersession(self):
         self.settings()
         self.prepare_checkout()
@@ -191,6 +202,36 @@ class PublicationTests(unittest.TestCase):
         result = self.root/'normalized.patch';result.write_text(normalized)
         self.git('apply', '--index', str(result))
         self.assertEqual(set(self.git('diff', '--cached', '--name-only').splitlines()), {'guide.md', 'hello.py'})
+
+    def test_clean_raw_patch_still_exposes_deleted_selected_base_source_to_scope_gate(self):
+        self.settings()
+        self.checkout()
+        cli_base = self.git('rev-parse', 'HEAD')
+        (self.path/'inherited.txt').write_text('selected implementation\n')
+        self.git('add', '--', 'inherited.txt')
+        self.git('commit', '-qm', 'Selected base')
+        selected = self.git('rev-parse', 'HEAD')
+        self.git('update-ref', 'refs/remotes/origin/main', selected)
+        (self.path/'inherited.txt').unlink()
+        (self.path/'guide.md').write_text('new guide\n')
+        (self.path/'.symphony-jules-report.json').write_text(json.dumps(fixtures.REPORT))
+        self.git('add', '--all')
+        raw = self.git('diff', '--cached', '--binary', '--full-index', cli_base)+'\n'
+        self.git('reset', '--hard', selected)
+        worker = self.worker(FakeCLI())
+        record = self.record(base_sha=selected, backend='jules', jules={
+            'phase': 'patch_ready', 'patch_base_sha': cli_base,
+            'patch_sha256': hashlib.sha256(raw.encode()).hexdigest()})
+        directory = worker.directory(record);directory.mkdir(parents=True)
+        patch_file = directory/'result.patch';patch_file.write_text(raw)
+        self.git('apply', '--check', str(patch_file))  # This succeeds despite the missing selected-only file.
+        self.config['protected_paths'] = ['inherited.txt']
+        with self.assertRaisesRegex(c.Error, 'Frozen inputs cannot be changed: inherited.txt'):
+            worker.advance(record)
+        self.assertFalse((self.path/'inherited.txt').exists())
+        self.assertTrue((directory/'normalized.patch').is_file())
+        self.assertEqual(patch_file.read_text(), raw)
+        self.assertIsNone(self.gh.pr)
 
     def test_completed_remote_patch_becomes_one_verified_draft_and_review(self):
         import json

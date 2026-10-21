@@ -200,7 +200,7 @@ class JulesWorker:
             try:
                 cli_base = browser.git(path, 'rev-parse', '--verify', '--quiet', 'refs/remotes/origin/HEAD')
             except subprocess.CalledProcessError:
-                cli_base = record['base_sha']
+                raise Error('The trusted CLI default-branch baseline is unknown; reconcile before submission') from None
             self.save(item_id, patch_base_sha=cli_base)
             comments = [row.get('body', '') for row in c.gh.pages(f'repos/{task.repository}/issues/{task.number}/comments')]
             prompt = (f"Implement {task.url} in {task.repository}. Start from {c.base_branch} at {record['base_sha']}.\n"
@@ -250,18 +250,16 @@ class JulesWorker:
             if phase == 'patch_ready':
                 if browser.git(path, 'status', '--porcelain'):
                     raise Error('Jules patch application requires its unchanged clean checkout')
-                try:
-                    support.run(['git', 'apply', '--check', str(patch)], cwd=path)
-                except Error:
-                    if state.get('patch_file') or state.get('patch_base_sha') in {None, record['base_sha']}:
-                        raise
+                if not state.get('patch_base_sha'):
+                    raise Error('The trusted CLI default-branch baseline is unknown; reconcile before application')
+                if not state.get('patch_file') and state['patch_base_sha'] != record['base_sha']:
                     normalized = normalize_patch(path, patch, record['base_sha'], state['patch_base_sha'], directory)
                     retained = directory/'normalized.patch'
                     retained.write_text(normalized)
                     self.save(item_id, patch_file=retained.name, raw_patch_sha256=state['patch_sha256'],
                               patch_sha256=hashlib.sha256(normalized.encode()).hexdigest())
                     patch = retained
-                    support.run(['git', 'apply', '--check', str(patch)], cwd=path)
+                support.run(['git', 'apply', '--check', str(patch)], cwd=path)
                 self.save(item_id, phase='applying', starting_head=browser.git(path, 'rev-parse', 'HEAD'))
                 support.run(['git', 'apply', '--index', str(patch)], cwd=path)
             else:
