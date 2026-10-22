@@ -86,6 +86,60 @@ class DockerTests(unittest.TestCase):
         with self.assertRaises(d.DockerError):
             d.command(self.config, self.workspace, ['codex'], validation=True)
 
+    def test_explicit_environment_crosses_both_launch_boundaries_without_values_in_argv(self):
+        import launch
+        self.config.update(runtime_bin=[])
+        self.config['docker']['forward_env'] = ['AZURE_CLIENT_SECRET', 'ARM_TENANT_ID']
+        source = {'HOME': '/host', 'AZURE_CLIENT_SECRET': 'synthetic-sensitive-value',
+                  'ARM_TENANT_ID': 'synthetic-tenant', 'UNRELATED_SECRET': 'not-for-worker'}
+        filtered = launch.worker_environment(self.config, self.root, source)
+        self.assertEqual(filtered['AZURE_CLIENT_SECRET'], source['AZURE_CLIENT_SECRET'])
+        self.assertNotIn('UNRELATED_SECRET', filtered)
+        with patch.dict(os.environ, filtered, clear=True):
+            args = d.command(self.config, self.workspace, ['codex'], home=d.auth_home(self.config, self.workspace))
+        self.assertIn('AZURE_CLIENT_SECRET', args)
+        self.assertIn('ARM_TENANT_ID', args)
+        self.assertNotIn(source['AZURE_CLIENT_SECRET'], ' '.join(args))
+
+    def test_validation_receives_neither_forwarded_credentials_nor_runtime_auth_cache(self):
+        self.config['docker'].update(forward_env=['AZURE_CLIENT_SECRET'], user_tools=True)
+        runtime = d.tools_directory(self.config, self.workspace, runtime=True)
+        (runtime/'azure-token-cache').write_text('synthetic-token')
+        args = d.command(self.config, self.workspace, ['python3', '-m', 'pytest'], validation=True)
+        self.assertNotIn('AZURE_CLIENT_SECRET', args)
+        self.assertFalse(any(str(runtime) in arg for arg in args))
+        self.assertIn('none', args)
+        tools = d.tools_directory(self.config, self.workspace)
+        self.assertIn(f'type=bind,src={tools},dst=/home/symphony/tools,readonly', args)
+
+    def test_tools_persist_on_retry_and_are_separate_for_workspace_and_image(self):
+        self.config['docker']['user_tools'] = True
+        tools = d.tools_directory(self.config, self.workspace)
+        (tools/'installed-tool').write_text('retained')
+        self.assertEqual((d.tools_directory(self.config, self.workspace)/'installed-tool').read_text(), 'retained')
+        self.assertNotEqual(tools, d.tools_directory(self.config, self.root/'GH-4'))
+        self.config['docker']['image'] = 'sha256:' + 'b'*64
+        self.assertNotEqual(tools, d.tools_directory(self.config, self.workspace))
+
+    def test_tools_paths_refuse_symlinks(self):
+        tools = d.tools_directory(self.config, self.workspace)
+        tools.rmdir()
+        tools.symlink_to(self.workspace, target_is_directory=True)
+        with self.assertRaises(d.DockerError):
+            d.tools_directory(self.config, self.workspace)
+
+    def test_environment_names_reject_values_and_worker_identity_overrides(self):
+        for names in ['AZURE_CLIENT_ID', ['AZURE_CLIENT_SECRET=value'], ['PATH'], ['HOME'], [None]]:
+            self.config['docker']['forward_env'] = names
+            with self.assertRaises(d.DockerError):
+                d.environment_names(self.config)
+
+    def test_missing_configured_credentials_fail_before_worker_start(self):
+        self.config['docker']['forward_env'] = ['MISSING_SYNTHETIC_CREDENTIAL']
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(d.DockerError, 'MISSING_SYNTHETIC_CREDENTIAL'):
+                d.command(self.config, self.workspace, ['codex'], home=d.auth_home(self.config, self.workspace))
+
     def test_symlinked_configuration_parent_is_rejected(self):
         target = self.workspace/'nested'
         target.mkdir()

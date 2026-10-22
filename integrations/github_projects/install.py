@@ -88,6 +88,10 @@ def validate_settings(settings):
             raise ValueError("Pin Docker image by ID or digest")
         if not Path(docker.get("auth_file", "")).is_absolute():
             raise ValueError("Configure a dedicated absolute Codex auth_file")
+        from docker_worker import environment_names
+        environment_names(settings)
+        if type(docker.get('user_tools', False)) is not bool:
+            raise ValueError('docker.user_tools must be a boolean')
     browser = settings.get("browser", {})
     if browser:
         if not isinstance(browser.get("scenarios"), list) or not browser["scenarios"]:

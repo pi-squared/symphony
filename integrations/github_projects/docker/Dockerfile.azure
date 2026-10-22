@@ -1,0 +1,24 @@
+# syntax=docker/dockerfile:1
+# Build the ordinary pinned Codex worker first; pass its local tag as WORKER_IMAGE.
+ARG WORKER_IMAGE=symphony-worker:base
+FROM ${WORKER_IMAGE}
+ARG AZURE_CLI_VERSION=2.91.0
+ARG DATABRICKS_CLI_VERSION=1.21.0
+RUN --mount=type=secret,id=proxy_ca,target=/run/proxy-ca.pem,mode=0444,required=true \
+    apt-get -o Acquire::https::CaInfo=/run/proxy-ca.pem update && apt-get -o Acquire::https::CaInfo=/run/proxy-ca.pem install -y --no-install-recommends \
+    curl unzip jq gnupg lsb-release python3-pip python3-venv build-essential \
+    poppler-utils fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
+RUN --mount=type=secret,id=proxy_ca,target=/run/proxy-ca.pem,mode=0444,required=true \
+    export CURL_CA_BUNDLE=/run/proxy-ca.pem && mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /etc/apt/keyrings/microsoft.gpg && \
+    printf '%s\n' 'deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/azure-cli/ bookworm main' > /etc/apt/sources.list.d/azure-cli.list && \
+    apt-get -o Acquire::https::CaInfo=/run/proxy-ca.pem update && apt-get -o Acquire::https::CaInfo=/run/proxy-ca.pem install -y --no-install-recommends "azure-cli=${AZURE_CLI_VERSION}-1~bookworm" && \
+    rm -rf /var/lib/apt/lists/*
+RUN --mount=type=secret,id=proxy_ca,target=/run/proxy-ca.pem,mode=0444,required=true \
+    export CURL_CA_BUNDLE=/run/proxy-ca.pem && curl -fsSL "https://github.com/databricks/cli/releases/download/v${DATABRICKS_CLI_VERSION}/databricks_cli_${DATABRICKS_CLI_VERSION}_linux_amd64.zip" -o /tmp/databricks.zip && \
+    unzip -q /tmp/databricks.zip databricks -d /usr/local/bin && chmod 755 /usr/local/bin/databricks && rm /tmp/databricks.zip
+RUN --mount=type=secret,id=proxy_ca,target=/run/proxy-ca.pem,mode=0444,required=true \
+    PIP_CERT=/run/proxy-ca.pem python3 -m pip install --break-system-packages --no-cache-dir \
+    pandas==2.2.3 pdfplumber==0.11.10 PyMuPDF==1.26.7 Pillow==12.3.0 Jinja2==3.1.6 pytest==8.4.2
+# Runtime runs as the host UID with a read-only system filesystem. user_tools
+# supplies its writable virtualenv, portable binaries and separate auth cache.

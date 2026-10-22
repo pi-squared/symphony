@@ -19,6 +19,33 @@ class DockerError(RuntimeError):
     pass
 
 
+def environment_names(config):
+    """Operator-selected names only; never serialize credential values in argv."""
+    names = config.get('docker', {}).get('forward_env', [])
+    if (not isinstance(names, list) or any(not isinstance(name, str)
+            or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', name) for name in names)):
+        raise DockerError('docker.forward_env must contain environment variable names only')
+    if set(names) & {'HOME', 'CODEX_HOME', 'PATH'}:
+        raise DockerError('docker.forward_env cannot replace the worker home or PATH')
+    return list(dict.fromkeys(names))
+
+
+def private_directory(path):
+    if path.is_symlink():
+        raise DockerError('Worker tools and runtime directories must not be symlinks')
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if not path.is_dir() or path.stat().st_mode & 0o077:
+        raise DockerError('Worker tools and runtime directories must be private')
+    return path
+
+
+def tools_directory(config, workspace, *, runtime=False):
+    # A different pinned image gets a new environment; retries keep their tools.
+    identity = hashlib.sha256((str(Path(workspace).resolve()) + '\0' + config['docker']['image']).encode()).hexdigest()[:24]
+    kind = 'worker-runtime' if runtime else 'worker-tools'
+    return private_directory(private_directory(Path(config['state_directory']) / kind) / identity)
+
+
 def binary(config):
     return config.get("docker", {}).get("binary", "docker")
 
@@ -86,6 +113,10 @@ def discovery_arguments(workspace):
 
 def command(config, workspace, argv, *, home=None, name=None, validation=False, packaged=None):
     docker = config["docker"]
+    forwarded = environment_names(config)
+    user_tools = docker.get('user_tools', False)
+    if type(user_tools) is not bool:
+        raise DockerError('docker.user_tools must be a boolean')
     image = docker["image"]
     if not re.fullmatch(r"(?:[^\s]+@)?sha256:[0-9a-f]{64}", image):
         raise DockerError("Pin the worker image by immutable image ID or digest")
@@ -112,8 +143,13 @@ def command(config, workspace, argv, *, home=None, name=None, validation=False, 
     else:
         if home is None:
             raise DockerError("A dedicated worker auth home is required")
+        worker_home = '/home/symphony/runtime' if user_tools else '/home/symphony'
         args += ["--interactive", "--mount", f"type=bind,src={home},dst=/home/symphony/.codex",
-                 "--env", "HOME=/home/symphony", "--env", "CODEX_HOME=/home/symphony/.codex"]
+                 "--env", "HOME=" + worker_home, "--env", "CODEX_HOME=/home/symphony/.codex"]
+        for key in forwarded:
+            if key not in os.environ:
+                raise DockerError('Missing configured worker environment variable: ' + key)
+            args += ['--env', key]
         if packaged:
             args += ['--mount', f'type=bind,src={packaged},dst=/home/symphony/.codex/skills,readonly']
         gh_auth = docker.get('git_auth_file')
@@ -131,8 +167,27 @@ def command(config, workspace, argv, *, home=None, name=None, validation=False, 
                 args += ['--env', key]
         if ca := docker.get('ca_bundle'):
             args += ['--mount', f'type=bind,src={Path(ca).resolve()},dst=/run/symphony-ca.pem,readonly']
-            for key in ('SSL_CERT_FILE', 'CODEX_CA_CERTIFICATE', 'NODE_EXTRA_CA_CERTS'):
+            for key in ('SSL_CERT_FILE', 'CODEX_CA_CERTIFICATE', 'NODE_EXTRA_CA_CERTS',
+                        'REQUESTS_CA_BUNDLE', 'PIP_CERT', 'CURL_CA_BUNDLE'):
                 args += ['--env', key + '=/run/symphony-ca.pem']
+    if user_tools:
+        tools = tools_directory(config, workspace)
+        suffix = ',readonly' if validation else ''
+        args += ['--mount', f'type=bind,src={tools},dst=/home/symphony/tools' + suffix,
+                 '--env', 'PATH=/home/symphony/tools/bin:/home/symphony/tools/venv/bin:/opt/codex/bin:/usr/local/bin:/usr/bin:/bin']
+        if not validation:
+            runtime = tools_directory(config, workspace, runtime=True)
+            args += ['--mount', f'type=bind,src={runtime},dst=/home/symphony/runtime',
+                     '--env', 'XDG_CACHE_HOME=/home/symphony/runtime/cache',
+                     '--env', 'XDG_CONFIG_HOME=/home/symphony/runtime/config',
+                     '--env', 'AZURE_CONFIG_DIR=/home/symphony/runtime/azure',
+                     '--env', 'PIP_CACHE_DIR=/home/symphony/tools/cache/pip',
+                     '--env', 'NPM_CONFIG_CACHE=/home/symphony/tools/cache/npm']
+            argv = ['sh', '-ec',
+                    'mkdir -p /home/symphony/tools/bin; '
+                    'if [ ! -x /home/symphony/tools/venv/bin/python ]; then '
+                    '/usr/bin/python3 -m venv --system-site-packages /home/symphony/tools/venv; fi; exec "$@"',
+                    'symphony-tools', *argv]
     return [*args, image, *map(str, argv)]
 
 

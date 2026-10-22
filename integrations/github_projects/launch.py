@@ -19,6 +19,12 @@ def worker_environment(config, install_root, source=None):
             "CODEX_CA_CERTIFICATE", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
             "OPENAI_API_KEY", "OPENAI_TEST_MODEL", "OPENAI_BASE_URL", "OPENAI_ORG_ID", "OPENAI_PROJECT_ID"}
     environment = {key: value for key, value in source.items() if key in keep}
+    if config.get('docker'):
+        from docker_worker import environment_names, DockerError
+        for key in environment_names(config):
+            if key not in source:
+                raise DockerError('Missing configured worker environment variable: ' + key)
+            environment[key] = source[key]
     environment.setdefault("OPENAI_TEST_MODEL", "gpt-6-luna")
     environment["PATH"] = ":".join([*config["runtime_bin"], str(Path.home() / ".local/bin"),
                                      "/usr/local/bin", "/usr/bin", "/bin"])

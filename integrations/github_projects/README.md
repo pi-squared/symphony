@@ -216,6 +216,39 @@ cleanup also removes owned containers. Failed Docker inspection blocks retries
 rather than assuming an orphan is gone. Enabling admission requires a preflight
 receipt bound to the actual executable/arguments and complete runtime settings.
 
+### Project credentials and additional tools
+
+Host environment variables are not inherited automatically. Set
+`docker.forward_env` to an explicit list of variable names, for example
+`["AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_TENANT_ID", "ARM_CLIENT_ID",
+"ARM_CLIENT_SECRET", "ARM_TENANT_ID", "DATABRICKS_HOST", "DATABRICKS_AUTH_TYPE"]`.
+The supervisor retains those names and Docker reads their values at container
+launch. Missing configured variables fail before the worker starts. Values and
+`NAME=value` entries are not accepted in this setting; worker HOME, CODEX_HOME
+and PATH cannot be overridden. Supply credentials to a persistent service through
+a private operator-managed environment file, outside Git and the image. A new
+shell environment does not update an already running service.
+
+Set `docker.user_tools: true` for persistent user-space installations. Each issue
+and pinned image gets a private tools directory mounted at `/home/symphony/tools`.
+Its `bin` and `venv/bin` are on PATH. The image must include `/usr/bin/python3`
+with venv support; first startup creates a writable virtualenv inheriting the
+image's Python packages. pip installs go into that environment; portable tools
+can be placed in `tools/bin`. Runtime HOME, Azure configuration and general
+configuration caches use a separate private runtime directory. Both persist on
+retry. Independent checks see tools read-only, without that runtime/auth cache
+or the forwarded credentials. System-wide apt installation remains unavailable
+inside the non-root worker's read-only image.
+
+`docker/Dockerfile.azure` extends the ordinary worker with pinned Azure and
+Databricks CLIs, Python/PDF test dependencies and build/download tools. Build it
+with `--build-arg WORKER_IMAGE=<local-base-worker-tag>` and
+`--secret id=proxy_ca,src=<trusted-combined-CA-bundle>`. BuildKit mounts the CA
+only during installation; it is not copied into image layers. Preserve the
+configured build proxy, pin the resulting image ID in the installation, and use
+`docker.ca_bundle` to mount runtime CA trust for Codex, Node, Python, pip and curl.
+Software packages are allowed; downloaded skill catalogs remain disallowed.
+
 ## Optional fire-and-forget Jules variations
 
 Configure `"jules": {"enabled": true, "label": "runner:jules"}`. Connect the
