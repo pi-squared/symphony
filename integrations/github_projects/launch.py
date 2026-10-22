@@ -10,7 +10,7 @@ import sys
 import time
 from pathlib import Path
 
-from controller import verify_preflight
+from controller import now, private_json, verify_preflight
 
 
 def worker_environment(config, install_root, source=None):
@@ -36,9 +36,6 @@ def main():
     if config["enabled"]:
         verify_preflight(args.config)
     environment = worker_environment(config, args.config.parent)
-    if config.get("jules", {}).get("enabled"):
-        from jules import validate_runtime
-        validate_runtime(config, environment)
     lock = open(Path(config["state_directory"]) / "service.lock", "a")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -63,7 +60,13 @@ def main():
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(sig, stop)
     try:
-        while not stopping and all(process.poll() is None for process in processes):
+        companion_reported = False
+        while not stopping and processes[0].poll() is None:
+            if processes[1].poll() is not None and not companion_reported:
+                private_json(Path(config["state_directory"])/"jules-dispatcher-error.json",
+                             {"error": "Jules dispatcher exited; default runner continues",
+                              "returncode": processes[1].returncode, "at": now()})
+                companion_reported = True
             time.sleep(0.25)
     finally:
         stop(None, None)
@@ -73,7 +76,8 @@ def main():
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait()
-    raise SystemExit(next((p.returncode for p in processes if p.returncode), 0))
+        lock.close()
+    raise SystemExit(processes[0].returncode)
 
 
 if __name__ == "__main__":

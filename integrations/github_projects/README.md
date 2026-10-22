@@ -216,47 +216,55 @@ cleanup also removes owned containers. Failed Docker inspection blocks retries
 rather than assuming an orphan is gone. Enabling admission requires a preflight
 receipt bound to the actual executable/arguments and complete runtime settings.
 
-## Optional concurrent Jules worker
+## Optional fire-and-forget Jules variations
 
-Configure `jules` with `enabled: true`, the absolute official CLI `binary` path,
-and `label: "runner:jules"`. Sign in and authorize the exact target repository
-through Jules before enabling the installation. Labelled eligible Ready issues
-select Jules; other issues select Codex. Required labels, native blockers,
-assignee filtering and the configured repository/board still apply. The local
-supervisor runs one Jules companion alongside Symphony's configured Codex pool.
-Only different issues run concurrently; claim locks and persisted backend choices
-prevent duplicate ownership. Label edits affect future claims, not active cycles.
-Include the CLI's supported Node runtime directory in `runtime_bin`; a login
-shell's Node version is not inherited by the supervisor. Preflight and startup
-load the CLI under that exact environment before either worker starts, retaining
-diagnostics privately if the CLI or its runtime cannot load.
+Configure `"jules": {"enabled": true, "label": "runner:jules"}`. Connect the
+[Jules GitHub app](https://github.com/apps/google-labs-jules/installations/select_target)
+to the exact repository and create its native `jules` label before enabling this
+option. Jules's [issue integration](https://jules.google/docs/running-tasks)
+reads the GitHub issue, works in its own remote environment and posts its session
+and resulting pull-request links on that issue. No Jules CLI, Node installation,
+API key, local checkout or patch handoff is required by Symphony.
 
-The CLI's lack of idempotent submission requires a write-ahead `submitting`
-record. A lost or malformed response becomes `submission_unknown` and reserves
-ownership; the worker never resubmits it automatically. Inspect the exact private
-prompt and Jules session list to reconcile it. Stopping the local supervisor
-leaves remote sessions recorded; their existence is not inferred from local PIDs.
-A known remote session resumes polling after restart. Human Rework waits for a
-remote session to become terminal, then selects a fresh Sol/xhigh Codex cycle,
-even when the original issue retains the Jules label. Merging also uses Codex.
+```text
+eligible issue + runner:jules -> add native jules label -> Jules -> remote PR
+same eligible issue          -> ordinary Codex worker -> normal review workflow
+```
 
-Jules returns a patch and a structured temporary handoff. The host checks it in
-its isolated issue checkout, removes the handoff file, runs independent checks,
-commits, pushes without force and verifies the remote SHA. It discovers or creates
-one exact-branch draft PR; interrupted application, commit, push and publication
-have recorded recovery points. Raw CLI output, prompts, patches and reports stay
-under private state, outside the issue checkout and source repository.
-The CLI can return a patch relative to the repository's default branch after a
-task switches to a selected feature base. The controller records that default
-baseline before dispatch. Whenever that baseline differs, it reconstructs the full
-returned tree in a private Git index and compares it with the recorded task
-base. Every net source change remains subject to the ordinary scope and checks;
-existing base changes are not republished. Both raw and normalized patches are
-retained with hashes. Unrecognized or missing baselines remain gated.
+The label requests an additional variation; it does not select the primary
+worker. Ready, In progress, In review and Rework roles can request a variation.
+Required labels, current issue state, assignee, native blockers when queued,
+repository/board membership and `only_issue` still apply. The primary Codex cycle
+keeps its own workpad, branch, PR, worker slot and board status. Human Rework
+continues to use Sol/xhigh without waiting for Jules. The native issue integration
+uses the repository's published/default branch context; it never receives local
+uncommitted changes or Symphony's checkout. A different explicit remote starting
+branch would require the Jules API rather than this native label route.
 
-Current-head CI and the existing application-evidence gates still govern entry
-to In review. Missing browser evidence or unresolved PR feedback retains the work
-and records an operational error; it does not waive validation or trigger an
-unrequested duplicate attempt. The CLI's plan/input requests remain visible in
-its remote status. The companion does not merge or deploy; only existing human
-Rework and Merging transitions authorize those lifecycle routes.
+The companion records one request per GitHub issue in the separate
+`jules_requests` table in the existing private SQLite ledger. It commits intent
+before adding the native label and confirms the returned labels. An existing
+native label is recorded without re-adding it. Restarts, new primary cycles,
+duplicate board items and label edits do not submit that issue again. A lost
+response becomes `submission_unknown`; a process crash may leave `requesting`.
+Neither is retried automatically or blocks Codex. Inspect the original GitHub
+issue/Jules task before an explicit further request through their interfaces.
+The receipt confirms a request, not successful remote work or PR creation.
+
+There is no session polling, patch retrieval/application, local report parsing,
+validation, host commit/push, controller-created PR, CI waiting or feedback repair
+for Jules. GitHub's normal checks and Jules's own remote behaviour can run;
+Symphony does not grade their results. A failed or input-blocked remote task is
+left with Jules. Remote PR creation is the handoff; merging remains a separate
+human decision. No Jules PR replaces the primary cycle's PR reference.
+
+The dispatcher submits the next eligible issue on the next tick even while an
+earlier Jules task is still running. Its API failures are logged privately and
+do not stop the main runner. If the companion itself exits, the supervisor logs
+that condition and lets Codex continue; restarting the installation resumes
+unsent requests without replaying recorded ones.
+
+Upgrades retain old managed Jules session/PR receipts, including archived cycles,
+without resubmitting or importing their patches. Old managed primary checkouts
+are preserved; an explicit Rework transition starts a fresh Codex cycle without
+waiting on the old remote task. Old `jules.binary` settings are unused.

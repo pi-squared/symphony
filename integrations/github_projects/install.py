@@ -77,9 +77,7 @@ def validate_settings(settings):
     jules = settings.get("jules")
     if jules:
         if not isinstance(jules, dict) or type(jules.get("enabled", False)) is not bool:
-            raise ValueError("Configure the optional Jules worker explicitly")
-        if jules.get("enabled") and not Path(jules.get("binary", "")).is_absolute():
-            raise ValueError("Configure an absolute installed Jules CLI path")
+            raise ValueError("Configure the optional Jules issue dispatcher explicitly")
         if not isinstance(jules.get("label", "runner:jules"), str) or not jules.get("label", "runner:jules").strip():
             raise ValueError("Configure a nonempty Jules issue label")
     docker = settings.get("docker")

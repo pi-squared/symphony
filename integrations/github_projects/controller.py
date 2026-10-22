@@ -332,16 +332,12 @@ class Controller:
 
     def backend_for(self, item):
         record = self.state.get(item["id"]) or {}
-        from jules import owns_cycle
-        if owns_cycle(record):
-            return "jules"
-        if self.role(item) in {"rework", "merging"}:
-            return "codex"
-        if record:
-            return record.get("backend", "codex")
-        settings = self.config.get("jules", {})
-        labels = {row["name"].lower() for row in item["content"]["labels"]["nodes"]}
-        return "jules" if settings.get("enabled") and settings.get("label", "runner:jules").lower() in labels else "codex"
+        # Native Jules requests are independent of the primary Codex cycle.
+        # Preserve legacy managed checkouts until an explicit human transition;
+        # Rework can start Codex immediately without waiting on remote Jules.
+        if record.get("backend") == "jules" and self.role(item) not in {"rework", "merging"}:
+            return "legacy_jules"
+        return "codex"
 
     def eligible(self, item, *, backend="codex"):
         if self.backend_for(item) != backend:

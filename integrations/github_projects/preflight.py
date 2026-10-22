@@ -151,17 +151,10 @@ def verify_profile(config_path, *, rework=False):
 
 def verify(config_path):
     config = json.loads(Path(config_path).read_text())
-    jules_receipt = None
-    if config.get("jules", {}).get("enabled"):
-        from jules import validate_runtime
-        from launch import worker_environment
-        jules_receipt = validate_runtime(config, worker_environment(config, Path(config_path).parent))
     receipt = verify_profile(config_path)
     receipt["rework"] = verify_profile(config_path, rework=True)
     from worker import execution_fingerprint
     receipt["execution_sha256"] = execution_fingerprint(config)
-    if jules_receipt:
-        receipt["jules"] = jules_receipt
     private_json(Path(config["state_directory"])/"preflight.json", receipt)
     return receipt
 
