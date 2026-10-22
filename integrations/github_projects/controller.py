@@ -61,6 +61,13 @@ def verify_preflight(config_path):
     receipt = json.loads(path.read_text())
     installed = json.loads((config_path.parent/"installed.json").read_text())
     digest = hashlib.sha256(Path(config["workflow"]).read_bytes()).hexdigest()
+    from worker import execution_settings, execution_fingerprint
+    if receipt.get("execution_sha256") != execution_fingerprint(config):
+        raise Error("Worker execution configuration changed; rerun preflight")
+    rework = receipt.get("rework", {})
+    if (any(rework.get(key) != value for key, value in execution_settings(config, rework=True).items())
+            or not rework.get("protocol_verified") or not rework.get("git_verified")):
+        raise Error("Run preflight for both ordinary and Rework settings")
     if (receipt.get("installation_identity") != installed["identity"] or receipt.get("workflow_sha256") != digest
             or not receipt.get("protocol_verified") or receipt.get("model") != config.get("model", "gpt-6.1-sol")
             or receipt.get("reasoning") != config.get("reasoning", "medium") or not receipt.get("git_verified")):
@@ -323,7 +330,18 @@ class Controller:
             raise Error("The recorded PR no longer matches Symphony's branch and repository")
         return pr
 
-    def eligible(self, item):
+    def backend_for(self, item):
+        record = self.state.get(item["id"]) or {}
+        # Native Jules requests are independent of the primary Codex cycle.
+        # Preserve legacy managed checkouts until an explicit human transition;
+        # Rework can start Codex immediately without waiting on remote Jules.
+        if record.get("backend") == "jules" and self.role(item) not in {"rework", "merging"}:
+            return "legacy_jules"
+        return "codex"
+
+    def eligible(self, item, *, backend="codex"):
+        if self.backend_for(item) != backend:
+            return False
         if not self.config["enabled"] or not self.routed(item):
             return False
         role = self.role(item)
@@ -400,6 +418,7 @@ class Controller:
         issue = self.gh.issue(task)
         labels = {label["name"].strip().lower() for label in issue["labels"]}
         status = self.gh.item_status(item_id)
+        item["content"]["labels"]["nodes"] = issue["labels"]
         if issue["state"] != "open" or not set(self.tracker.get("required_labels", [])).issubset(labels) or status is None:
             raise Error("The issue was closed, unlabelled, archived, or removed before this operation")
         for value in item["fieldValues"]["nodes"]:
@@ -444,7 +463,15 @@ class Controller:
                     payload={"body": MARKER + f"\n<!-- symphony-github-projects-cycle:{record.get('cycle', 1)} -->\n" + body})
         return {"comment_id": record["comment_id"]}
 
-    def claim(self, item_id, workspace, *, new_attempt=False):
+    def claim_lock(self, item_id):
+        directory = Path(self.config["state_directory"])/"claim-locks"/hashlib.sha256(item_id.encode()).hexdigest()
+        return controller_lock(directory)
+
+    def claim(self, item_id, workspace, *, new_attempt=False, backend="codex"):
+        with self.claim_lock(item_id):
+            return self._claim(item_id, workspace, new_attempt=new_attempt, backend=backend)
+
+    def _claim(self, item_id, workspace, *, new_attempt=False, backend="codex"):
         if not self.config["enabled"]:
             raise Error("Symphony admission is paused")
         project, item, task = self.find(item_id)
@@ -453,8 +480,8 @@ class Controller:
         role = self.role(item)
         if role == "review" and record:
             return self.context(task, record)
-        if not self.eligible(item):
-            raise Error("The issue is not eligible for Symphony")
+        if not self.eligible(item, backend=backend):
+            raise Error("The issue is not eligible for this Symphony backend")
         pr = self.owned_pr(task, record) if record and record.get("pr_number") else None
         restart = bool(record and ((role == "rework" and record.get("phase") != "rework")
                        or (role == "queued" and pr and pr["state"] != "open")))
@@ -501,6 +528,14 @@ class Controller:
                 phase="claiming", workspace=str(path), started_at=now(),
                 **({"pr_number": pr["number"], "pr_url": pr["html_url"], "published_sha": pr["head"]["sha"]} if pr else {}),
                 **({"previous_cycle": previous} if previous and not pr else {}))
+        # The execution choice belongs to the cycle, not the transient board
+        # state. Rework switches to working after acknowledgment; retries must
+        # retain its requested model/effort.
+        if not record.get("backend"):
+            record = self.state.save(item_id, backend=backend)
+        if not record.get("execution"):
+            from worker import execution_settings
+            record = self.state.save(item_id, execution=execution_settings(self.config, rework=role == "rework"))
         self.ensure_checkout(task, record, path)
         if role == "rework":
             self.state.save(item_id, phase="rework")
@@ -561,7 +596,7 @@ class Controller:
         support.run(["git", "config", "--local", "credential.helper", "!" + shlex.quote(gh) + " auth git-credential"], cwd=path)
         self.state.save(task.item_id, base_sha=record.get("base_sha") or browser.git(path, "merge-base", self.base_ref, "HEAD"))
         skill_source = Path(__file__).resolve().parent / "templates/skills"
-        if skill_source.exists():
+        if skill_source.exists() and not self.config.get("docker"):
             target = path / ".codex/skills"
             # Bootstrap skills into older application revisions, excluding them
             # from publication unless the issue deliberately tracks them.
@@ -580,6 +615,7 @@ class Controller:
                     if not (c.get("body") or "").startswith(MARKER)]
         result = {"issue": issue, "discussion": comments, "branch": task.branch,
                   "phase": record["phase"], "cycle": record.get("cycle", 1),
+                  "execution": record.get("execution"),
                   "repository": task.repository, "base_branch": self.base_branch,
                   "project_owner": self.config["project_owner"], "project_number": self.config["project_number"],
                   "required_checks": self.policy["validation"]["required_checks"], "fields": self.field_names,
@@ -653,7 +689,11 @@ class Controller:
 
     def independent_checks(self, task, path, report):
         evidence = []
-        sandbox = runtime.Sandbox(self.config["runtime_roots"])
+        if self.config.get("docker"):
+            from docker_worker import DockerSandbox
+            sandbox = DockerSandbox(self.config)
+        else:
+            sandbox = runtime.Sandbox(self.config["runtime_roots"])
         for command in self.config["checks"]:
             argv = [str(self.config["python"]) if part == "{python}" else part for part in command]
             try:
@@ -689,6 +729,33 @@ class Controller:
         self.state.save(item_id, validated_source=browser.inventory(path)["sha256"],
                         validated_sha=browser.git(path, "rev-parse", "HEAD"), validation=report)
         return report
+
+    def git_remote(self, item_id, workspace, action):
+        _, item, task = self.find(item_id)
+        if not self.config["enabled"] or self.role(item) not in {"working", "merging"}:
+            raise Error("Git remote operations require an active working or Merging issue")
+        path = self.workspace(task, workspace)
+        if browser.git(path, "branch", "--show-current") != task.branch:
+            raise Error("Git remote operation must use the selected issue branch")
+        origin = browser.git(path, "remote", "get-url", "origin").removesuffix(".git")
+        if origin != "https://github.com/" + task.repository:
+            raise Error("The Git origin changed from the bound repository")
+        if action == "fetch":
+            support.run(["git", "fetch", "https://github.com/" + task.repository + ".git",
+                         "refs/heads/" + self.base_branch + ":refs/remotes/origin/" + self.base_branch], cwd=path, timeout=240)
+            return {"base_ref": self.base_ref, "sha": browser.git(path, "rev-parse", self.base_ref)}
+        if action != "push":
+            raise Error("Git remote action must be fetch or push")
+        self.validate(item_id, workspace)
+        sha = browser.git(path, "rev-parse", "HEAD")
+        if browser.git(path, "status", "--porcelain"):
+            raise Error("Commit scoped source changes before pushing")
+        if self.gh.remote_head(task.repository, task.branch) != sha:
+            support.run(["git", "push", "https://github.com/" + task.repository + ".git",
+                         sha + ":refs/heads/" + task.branch], cwd=path, timeout=240)
+        if self.gh.remote_head(task.repository, task.branch) != sha:
+            raise Error("GitHub did not confirm the selected issue commit")
+        return {"branch": task.branch, "sha": sha, "remote_verified": True}
 
     def review(self, item_id, workspace, arguments):
         project, item, task = self.find(item_id)
@@ -769,6 +836,9 @@ class Controller:
 
     def cleanup(self, path, terminal=True):
         path = Path(path).resolve()
+        if self.config.get("docker"):
+            from docker_worker import stop_owned
+            stop_owned(self.config, path)
         record = next((r for r in self.state.all() if r.get("workspace") == str(path)), None)
         if not record:
             root = Path(self.config["workspace_root"]).resolve()
@@ -833,6 +903,8 @@ class Controller:
                 return self.restart(task)
             if name == "project_validate":
                 return self.validate(item_id, workspace)
+            if name == "project_git":
+                return self.git_remote(item_id, workspace, args["action"])
             if name == "project_review":
                 return self.review(item_id, workspace, args)
             if name == "project_done":

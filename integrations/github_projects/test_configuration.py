@@ -116,7 +116,8 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(policy["tracker"]["provider"]["repo"], "example/project")
         self.assertFalse(policy["tracker"]["provider"]["browser_enabled"])
         self.assertEqual(policy["validation"]["required_checks"], ["Unit tests"])
-        self.assertIn('model="configured-model"', policy["codex"]["command"])
+        self.assertIn('worker.py', policy['codex']['command'])
+        self.assertIn('model="configured-model"', config['codex_argv'])
         self.assertEqual(policy["agent"]["max_concurrent_agents"], 1)
         package = self.destination / "current/controller"
         result = subprocess.run([sys.executable, "-c", "import controller, browser, attachments, sandbox"],

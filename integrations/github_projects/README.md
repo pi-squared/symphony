@@ -79,7 +79,12 @@ repository's contributor skills. Existing target-repository skills are preserved
 Defaults are one worker, 30-second polling, 20 turns, five-minute maximum retry
 backoff, `gpt-6.1-sol` with medium reasoning, and the named `symphony` permission
 profile. `max_concurrent_agents`, `model` and `reasoning` are configurable.
-Preflight checks the selected model, profile, dynamic-tool protocol and actual
+Explicit human Rework starts a fresh cycle using `rework_model: gpt-6.1-sol`
+and `rework_reasoning: xhigh`. Settings are persisted with that cycle, so retries
+and resumption after the board returns to In progress keep xhigh. Ordinary work
+keeps the installation's existing model/reasoning. The bound worker launcher
+uses actual CLI configuration, not prompt instructions.
+Preflight checks both ordinary and Rework settings, profile, dynamic-tool protocol and actual
 Git writes without starting a model turn. Enabling admission requires a receipt
 matching the installed release and workflow.
 
@@ -176,3 +181,123 @@ Imported from `pi-squared/OpenContracts-Development` revision
 in this fork. Application-specific launchers, fixtures, assertions, journeys,
 deployment code and pilot issue 33 additions are excluded. Recording helper
 provenance is retained in `recording/provenance.json`.
+
+## Local Docker issue workers
+
+Set `docker.image` to an immutable local `sha256:...` image ID or registry
+`name@sha256:...`, with the complete Codex package at `/opt/codex/bin/codex`,
+Git, GitHub CLI and project build/test tools. The host's Docker daemon is never
+mounted into the worker. `docker.auth_file` selects a dedicated Codex auth cache;
+only that file seeds a private per-issue home. Refreshed credentials and sessions
+persist across retries. `docker.git_auth_file`, when configured, is a private
+repository-scoped GitHub CLI `hosts.yml`; board credentials remain on the host.
+An optional `ca_bundle` preserves the configured proxy's certificate trust.
+
+The issue checkout is mounted at the same absolute path, with the invoking
+UID/GID. The image root is read-only, capabilities are dropped, and default
+ceilings are 2 CPUs, 4 GiB and 512 processes. Docker Cloud is not used.
+Repository skill discovery is disabled through supported per-skill CLI overrides;
+project Codex configuration is untrusted. Tracked skill/config files remain intact
+for Git. Packaged system skills are extracted from the pinned image and mounted
+read-only, rather than trusted by a writable directory name. Preflight inspects the effective skill catalog.
+The existing Git, review, evidence and landing procedures become ordinary inline
+workflow instructions rather than installed skills. AGENTS.md remains readable.
+
+Independent checks use separate networkless containers without auth caches or
+Git credentials and with Git metadata read-only. Application browser workers
+continue to use the explicitly configured external worker contract; their
+application-specific environment remains the operator's responsibility.
+
+Container names and labels bind installation, issue workspace and cycle.
+Cancellation removes only matching owned containers. An exclusive per-workspace
+launcher lock prevents duplicate workers. Startup reconciles and removes orphaned
+containers from previous cycles before reusing the persistent checkout. Controller
+cleanup also removes owned containers. Failed Docker inspection blocks retries
+rather than assuming an orphan is gone. Enabling admission requires a preflight
+receipt bound to the actual executable/arguments and complete runtime settings.
+
+### Project credentials and additional tools
+
+Host environment variables are not inherited automatically. Set
+`docker.forward_env` to an explicit list of variable names, for example
+`["AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_TENANT_ID", "ARM_CLIENT_ID",
+"ARM_CLIENT_SECRET", "ARM_TENANT_ID", "DATABRICKS_HOST", "DATABRICKS_AUTH_TYPE"]`.
+The supervisor retains those names and Docker reads their values at container
+launch. Missing configured variables fail before the worker starts. Values and
+`NAME=value` entries are not accepted in this setting; worker HOME, CODEX_HOME
+and PATH cannot be overridden. Supply credentials to a persistent service through
+a private operator-managed environment file, outside Git and the image. A new
+shell environment does not update an already running service.
+
+Set `docker.user_tools: true` for persistent user-space installations. Each issue
+and pinned image gets a private tools directory mounted at `/home/symphony/tools`.
+Its `bin` and `venv/bin` are on PATH. The image must include `/usr/bin/python3`
+with venv support; first startup creates a writable virtualenv inheriting the
+image's Python packages. pip installs go into that environment; portable tools
+can be placed in `tools/bin`. Runtime HOME, Azure configuration and general
+configuration caches use a separate private runtime directory. Both persist on
+retry. Independent checks see tools read-only, without that runtime/auth cache
+or the forwarded credentials. System-wide apt installation remains unavailable
+inside the non-root worker's read-only image.
+
+`docker/Dockerfile.azure` extends the ordinary worker with pinned Azure and
+Databricks CLIs, Python/PDF test dependencies and build/download tools. Build it
+with `--build-arg WORKER_IMAGE=<local-base-worker-tag>` and
+`--secret id=proxy_ca,src=<trusted-combined-CA-bundle>`. BuildKit mounts the CA
+only during installation; it is not copied into image layers. Preserve the
+configured build proxy, pin the resulting image ID in the installation, and use
+`docker.ca_bundle` to mount runtime CA trust for Codex, Node, Python, pip and curl.
+Software packages are allowed; downloaded skill catalogs remain disallowed.
+
+## Optional fire-and-forget Jules variations
+
+Configure `"jules": {"enabled": true, "label": "runner:jules"}`. Connect the
+[Jules GitHub app](https://github.com/apps/google-labs-jules/installations/select_target)
+to the exact repository and create its native `jules` label before enabling this
+option. Jules's [issue integration](https://jules.google/docs/running-tasks)
+reads the GitHub issue, works in its own remote environment and posts its session
+and resulting pull-request links on that issue. No Jules CLI, Node installation,
+API key, local checkout or patch handoff is required by Symphony.
+
+```text
+eligible issue + runner:jules -> add native jules label -> Jules -> remote PR
+same eligible issue          -> ordinary Codex worker -> normal review workflow
+```
+
+The label requests an additional variation; it does not select the primary
+worker. Ready, In progress, In review and Rework roles can request a variation.
+Required labels, current issue state, assignee, native blockers when queued,
+repository/board membership and `only_issue` still apply. The primary Codex cycle
+keeps its own workpad, branch, PR, worker slot and board status. Human Rework
+continues to use Sol/xhigh without waiting for Jules. The native issue integration
+uses the repository's published/default branch context; it never receives local
+uncommitted changes or Symphony's checkout. A different explicit remote starting
+branch would require the Jules API rather than this native label route.
+
+The companion records one request per GitHub issue in the separate
+`jules_requests` table in the existing private SQLite ledger. It commits intent
+before adding the native label and confirms the returned labels. An existing
+native label is recorded without re-adding it. Restarts, new primary cycles,
+duplicate board items and label edits do not submit that issue again. A lost
+response becomes `submission_unknown`; a process crash may leave `requesting`.
+Neither is retried automatically or blocks Codex. Inspect the original GitHub
+issue/Jules task before an explicit further request through their interfaces.
+The receipt confirms a request, not successful remote work or PR creation.
+
+There is no session polling, patch retrieval/application, local report parsing,
+validation, host commit/push, controller-created PR, CI waiting or feedback repair
+for Jules. GitHub's normal checks and Jules's own remote behaviour can run;
+Symphony does not grade their results. A failed or input-blocked remote task is
+left with Jules. Remote PR creation is the handoff; merging remains a separate
+human decision. No Jules PR replaces the primary cycle's PR reference.
+
+The dispatcher submits the next eligible issue on the next tick even while an
+earlier Jules task is still running. Its API failures are logged privately and
+do not stop the main runner. If the companion itself exits, the supervisor logs
+that condition and lets Codex continue; restarting the installation resumes
+unsent requests without replaying recorded ones.
+
+Upgrades retain old managed Jules session/PR receipts, including archived cycles,
+without resubmitting or importing their patches. Old managed primary checkouts
+are preserved; an explicit Rework transition starts a fresh Codex cycle without
+waiting on the old remote task. Old `jules.binary` settings are unused.

@@ -17,7 +17,9 @@ Discover existing PRs with GET `/repos/REPOSITORY/pulls`
 params `state=open`, `head=OWNER:CURRENT_BRANCH`, `base=BASE_BRANCH`. Reuse the
 matching current-cycle PR. If none exists, POST `/pulls` with title, head, base
 BASE_BRANCH, draft true and a body following the repository PR template. Include the
-issue URL and `<!-- symphony-github-projects -->`. After an ambiguous API response,
+issue URL and follow the repository's body checks, including executable test
+checkboxes when required. Keep internal HTML markers out of the PR body; exact
+repository/base/branch ownership already identifies this cycle. After an ambiguous API response,
 rediscover before retrying creation. Maintain the body for the final behavior,
 validation and risks. Add the symphony label if available (create it if allowed).
 Videos belong only in the linked issue discussion.

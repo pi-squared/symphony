@@ -74,6 +74,24 @@ def validate_settings(settings):
     fields = settings.get("fields", {})
     if set(fields) - {"status", "priority", "execution_order"} or any(not isinstance(v, str) or not v.strip() for v in fields.values()):
         raise ValueError("Configure nonempty status, priority and execution_order field names")
+    jules = settings.get("jules")
+    if jules:
+        if not isinstance(jules, dict) or type(jules.get("enabled", False)) is not bool:
+            raise ValueError("Configure the optional Jules issue dispatcher explicitly")
+        if not isinstance(jules.get("label", "runner:jules"), str) or not jules.get("label", "runner:jules").strip():
+            raise ValueError("Configure a nonempty Jules issue label")
+    docker = settings.get("docker")
+    if docker:
+        if not isinstance(docker, dict) or not isinstance(docker.get("image"), str):
+            raise ValueError("Docker workers require a pinned image")
+        if not docker["image"].startswith("sha256:") and "@sha256:" not in docker["image"]:
+            raise ValueError("Pin Docker image by ID or digest")
+        if not Path(docker.get("auth_file", "")).is_absolute():
+            raise ValueError("Configure a dedicated absolute Codex auth_file")
+        from docker_worker import environment_names
+        environment_names(settings)
+        if type(docker.get('user_tools', False)) is not bool:
+            raise ValueError('docker.user_tools must be a boolean')
     browser = settings.get("browser", {})
     if browser:
         if not isinstance(browser.get("scenarios"), list) or not browser["scenarios"]:
@@ -94,6 +112,9 @@ def validate_settings(settings):
         raise ValueError("Configure seven distinct nonempty lifecycle roles")
     if type(settings.get("max_concurrent_agents", 1)) is not int or settings.get("max_concurrent_agents", 1) < 1:
         raise ValueError("max_concurrent_agents must be positive")
+    for key in ("model", "reasoning", "rework_model", "rework_reasoning"):
+        if key in settings and (not isinstance(settings[key], str) or not settings[key].strip()):
+            raise ValueError(key + " must be a nonempty string")
     patterns = browser.get("required_paths", [])
     if not isinstance(patterns, list) or any(not isinstance(p, str) for p in patterns):
         raise ValueError("Browser required_paths must be a list of patterns")
@@ -192,12 +213,30 @@ def install_stopped(destination, settings):
         elif value.startswith("model_reasoning_effort="):
             command[i] = "model_reasoning_effort=" + json.dumps(config["reasoning"])
     command[0] = str(codex)
-    policy["codex"]["command"] = shlex.join(command)
+    config["codex_argv"] = command
+    config["rework_model"] = settings.get("rework_model", "gpt-6.1-sol")
+    config["rework_reasoning"] = settings.get("rework_reasoning", "xhigh")
+    policy["codex"]["command"] = shlex.join([
+        str(python), str(current / "controller/worker.py"), "--config", str(config_path)])
     policy["validation"]["required_checks"] = config["required_checks"]
     policy["server"]["port"] = config["port"]
     # Role placeholders keep the same prompt usable with renamed board states.
     for role, value in roles.items():
         body = body.replace("__ROLE_" + role.upper() + "__", value)
+    if config.get("docker"):
+        # The operational procedures remain ordinary task instructions. No
+        # downloaded skill catalog is installed into the issue or worker home.
+        body = body.replace(".codex/skills/land/SKILL.md", "the embedded land procedure")
+        body = body.replace("skill", "procedure").replace("Skill", "Procedure")
+        body += "\n\n## Embedded operating procedures\n\n"
+        for source in sorted((HERE / "templates/skills").glob("*/SKILL.md")):
+            body += "\n### " + source.parent.name + "\n" + source.read_text().split("---", 2)[-1]
+        body += ("\nUse packaged OpenAI skills only. Keep additional skill catalogs uninstalled.\n"
+                 "For authenticated Git remote I/O call project_git with action fetch before merging "
+                 "origin/BASE_BRANCH, and action push after committing and validating. These host-bound "
+                 "operations replace shell git fetch/push in the embedded procedures. The host verifies "
+                 "the repository/branch and remote SHA; GitHub credentials remain outside this container. "
+                 "Use local Git for commits and merges, and github_api for draft PR creation.\n")
     workflow = "---\n" + json.dumps(policy, indent=2) + "\n---" + body
     (release / "WORKFLOW.md").write_text(workflow)
     ledger = Ledger(config["state_directory"])

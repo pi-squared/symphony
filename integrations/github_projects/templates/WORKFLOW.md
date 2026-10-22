@@ -52,7 +52,7 @@
     "timeout_ms": 300000
   },
   "codex": {
-    "command": "__CODEX__ --config 'model=\"gpt-6.1-sol\"' --config 'model_reasoning_effort=\"medium\"' --config 'permissions.symphony.filesystem={\":root\"=\"read\",\":workspace_roots\"={\".\"=\"write\",\".git\"=\"write\",\".codex\"=\"write\",\".agents\"=\"write\"},\"/tmp\"=\"write\"}' --config permissions.symphony.network.enabled=true app-server",
+    "command": "__CODEX__ --config 'model=\"gpt-6.1-sol\"' --config 'model_reasoning_effort=\"medium\"' --config 'permissions.symphony.filesystem={\":root\"=\"read\",\":workspace_roots\"={\".\"=\"write\",\".git\"=\"write\",\".codex\"=\"write\",\".agents\"=\"write\"},\"/tmp\"=\"write\"}' --config permissions.symphony.network.enabled=true --config 'default_permissions=\"symphony\"' app-server",
     "approval_policy": {
       "granular": {
         "sandbox_approval": false,

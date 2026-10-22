@@ -113,6 +113,9 @@ defmodule SymphonyElixir.GitHubProjects.Adapter do
           },
           tool("project_workpad", "Replace the current workpad with its complete maintained plan, acceptance criteria, validation and notes.", %{"body" => %{"type" => "string"}}, ["body"]),
           tool("project_restart", "Acknowledge human Rework after closing the old PR and deleting the old workpad.", %{}, []),
+          tool("project_git", "Fetch the configured base or push the validated selected issue branch using host Git credentials.", %{"action" => %{"type" => "string", "enum" => ["fetch", "push"]}}, [
+            "action"
+          ]),
           tool("project_validate", "Run independent credential, frozen-input and repository checks before a native Git push.", %{}, []),
           tool(
             "project_review",
@@ -133,7 +136,19 @@ defmodule SymphonyElixir.GitHubProjects.Adapter do
 
   @impl true
   def execute_agent_tool(tool, arguments, opts)
-      when tool in ["project_claim", "project_browser", "project_evidence", "project_workpad", "project_restart", "project_validate", "project_review", "project_done", "project_block", "github_api"] and
+      when tool in [
+             "project_claim",
+             "project_browser",
+             "project_evidence",
+             "project_workpad",
+             "project_restart",
+             "project_validate",
+             "project_git",
+             "project_review",
+             "project_done",
+             "project_block",
+             "github_api"
+           ] and
              is_map(arguments) do
     settings = Keyword.fetch!(opts, :tracker_settings)
 

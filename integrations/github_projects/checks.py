@@ -3,6 +3,7 @@
 import argparse
 from pathlib import Path
 import subprocess
+import host_git
 from fnmatch import fnmatchcase
 
 from controller import support, browser, Error
@@ -11,9 +12,7 @@ from controller import support, browser, Error
 def verify_changes(workspace, base="origin/main", protected_paths=()):
     workspace = Path(workspace).resolve()
     merge_base = browser.git(workspace, "merge-base", base, "HEAD")
-    names = subprocess.check_output(
-        ["git", "diff", "--name-only", "--no-renames", "-z", merge_base], cwd=workspace
-    ).decode().split("\0")
+    names = host_git.output(workspace, "diff", "--no-ext-diff", "--name-only", "--no-renames", "-z", merge_base).decode().split("\0")
     names += support.check_publication_paths(workspace)
     for name in set(filter(None, names)):
         path = workspace / name
@@ -30,7 +29,7 @@ def verify_changes(workspace, base="origin/main", protected_paths=()):
             if support.SECRET_PATTERN.search(content):
                 raise Error("Potential credential in PR changes: " + name)
     browser.reject_video_changes(workspace, base)
-    subprocess.run(["git", "diff", "--check", merge_base], cwd=workspace, check=True)
+    host_git.output(workspace, "diff", "--no-ext-diff", "--check", merge_base)
     return {"files_checked": len(set(filter(None, names)))}
 
 

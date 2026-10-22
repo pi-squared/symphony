@@ -12,5 +12,8 @@
   "runtime_roots": [],
   "max_concurrent_agents": 1,
   "model": "gpt-6.1-sol",
-  "reasoning": "medium"
+  "reasoning": "medium",
+  "rework_model": "gpt-6.1-sol",
+  "rework_reasoning": "xhigh",
+  "jules": {"enabled": false, "label": "runner:jules"}
 }
